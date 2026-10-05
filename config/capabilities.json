@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-10-05T19:24:45.038497+00:00",
+  "base_url": "https://api.tokenfactory.nebius.com/v1/",
+  "models": {
+    "nano": {
+      "alias": "nano",
+      "id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
+      "available": true,
+      "native_tools": true,
+      "json_schema": true,
+      "thinking": {
+        "toggle": "chat_template_kwargs",
+        "reasoning_fields": [
+          "reasoning"
+        ],
+        "reasoning_budget_param": true
+      },
+      "latency_ms": 574,
+      "errors": []
+    },
+    "super": {
+      "alias": "super",
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "available": true,
+      "native_tools": true,
+      "json_schema": true,
+      "thinking": {
+        "toggle": "chat_template_kwargs",
+        "reasoning_fields": [
+          "reasoning_content",
+          "reasoning"
+        ],
+        "reasoning_budget_param": true
+      },
+      "latency_ms": 297,
+      "errors": []
+    },
+    "ultra": {
+      "alias": "ultra",
+      "id": "nvidia/Nemotron-3-Ultra-550b-a55b",
+      "available": true,
+      "native_tools": true,
+      "json_schema": true,
+      "thinking": {
+        "toggle": "chat_template_kwargs",
+        "reasoning_fields": [
+          "reasoning_content"
+        ],
+        "reasoning_budget_param": true
+      },
+      "latency_ms": 254,
+      "errors": []
+    },
+    "lightning": {
+      "alias": "lightning",
+      "id": "nvidia/Nemotron-3_5-Lightning",
+      "available": true,
+      "native_tools": true,
+      "json_schema": true,
+      "thinking": {
+        "toggle": "chat_template_kwargs",
+        "reasoning_fields": [
+          "reasoning_content",
+          "reasoning"
+        ],
+        "reasoning_budget_param": true
+      },
+      "latency_ms": 243,
+      "errors": []
+    }
+  }
+}
