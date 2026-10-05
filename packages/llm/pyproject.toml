@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "doubleblind-llm"
+version = "0.1.0"
+description = "Nebius Token Factory client for DoubleBlind agents"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+  "openai>=1.50",
+  "httpx>=0.27",
+  "pydantic>=2.8",
+  "tenacity>=9.0",
+  "pyyaml>=6.0",
+  "typer>=0.12",
+  "rich>=13.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["doubleblind_llm"]

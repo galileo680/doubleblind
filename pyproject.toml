@@ -1,0 +1,24 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["dashboard", "demo/parcelly", "volumes", "docs", "ideas"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ERA", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["doubleblind_llm", "doubleblind_contract", "doubleblind_broker", "doubleblind_agent"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages"]
+addopts = "--import-mode=importlib -q"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "doubleblind-broker"
+version = "0.1.0"
+description = "Neutral DoubleBlind broker: sessions, contract versions, events and E2E orchestration"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+  "doubleblind-contract",
+  "doubleblind-llm",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlmodel>=0.0.22",
+  "sse-starlette>=2.1",
+  "httpx>=0.27",
+  "jsonpatch>=1.33",
+  "pydantic>=2.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["doubleblind_broker"]
