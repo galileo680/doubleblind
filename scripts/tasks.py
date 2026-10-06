@@ -11,7 +11,9 @@ VENV = ROOT / ".venv"
 MIN_PYTHON = (3, 12)
 PYTHON_PACKAGES = ("llm", "contract", "broker", "agent")
 DASHBOARD = ROOT / "dashboard"
+SPOKES = ROOT / "demo" / "spokes"
 NODE_PROJECTS = (DASHBOARD, ROOT / "demo" / "parcelly")
+SPOKES_MYPY_TARGETS = ("app", "tests", "seed.py")
 MYPY_TARGETS = (
     *(f"packages/{name}/doubleblind_{name}" for name in PYTHON_PACKAGES),
     "scripts",
@@ -101,6 +103,7 @@ def task_install() -> None:
     for name in PYTHON_PACKAGES:
         editable += ["-e", f"packages/{name}"]
     run([python, "-m", "pip", "install", *editable])
+    run([python, "-m", "pip", "install", "-r", SPOKES / "requirements.txt"])
     for project in NODE_PROJECTS:
         command = "ci" if (project / "package-lock.json").exists() else "install"
         run([npm(), command], cwd=project)
@@ -115,6 +118,7 @@ def task_lint() -> None:
     run([python, "-m", "ruff", "check", "."])
     run([python, "-m", "ruff", "format", "--check", "."])
     run([python, "-m", "mypy", *MYPY_TARGETS])
+    run([python, "-m", "mypy", *SPOKES_MYPY_TARGETS], cwd=SPOKES)
     task_check_comments()
     run_npm_script("lint")
     run_npm_script("format:check")
@@ -129,8 +133,14 @@ def task_format() -> None:
 
 
 def task_test() -> None:
-    run([require_venv(), "-m", "pytest"])
+    python = require_venv()
+    run([python, "-m", "pytest"])
+    run([python, "-m", "pytest"], cwd=SPOKES)
     run_npm_script("test")
+
+
+def task_smoke_demo() -> None:
+    run([require_venv(), "scripts/smoke_demo_apps.py"])
 
 
 def task_build() -> None:
@@ -152,6 +162,7 @@ TASKS: dict[str, Callable[[], None]] = {
     "test": task_test,
     "build": task_build,
     "check-comments": task_check_comments,
+    "smoke-demo": task_smoke_demo,
     **{target: pending(target) for target in PENDING_TARGETS},
 }
 

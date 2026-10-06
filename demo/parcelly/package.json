@@ -3,20 +3,27 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "src/server.js",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
+    "start": "node src/server.js",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.12.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.9",
+    "supertest": "^7.3.1",
     "vitest": "^5.0.3"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "express": "^5.2.1"
   }
 }
