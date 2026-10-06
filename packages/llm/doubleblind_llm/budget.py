@@ -10,7 +10,7 @@ from doubleblind_llm.errors import BudgetExceededError, ConfigurationError
 
 LEDGER_ENV = "DOUBLEBLIND_LEDGER_PATH"
 SPEND_LIMIT_ENV = "DOUBLEBLIND_SPEND_LIMIT_USD"
-DEFAULT_SPEND_LIMIT_USD = 25.0
+DEFAULT_SPEND_LIMIT_USD = 50.0
 
 
 class LedgerEntry(BaseModel):

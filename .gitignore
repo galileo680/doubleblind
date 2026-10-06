@@ -15,4 +15,8 @@ volumes/
 *.sqlite3
 .DS_Store
 Thumbs.db
-.claude/settings.local.json
+/.claude/
+/docs/
+/reports/
+/research_notes/
+/ideas/

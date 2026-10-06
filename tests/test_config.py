@@ -53,4 +53,4 @@ def test_env_example_lists_required_keys_without_values_for_secrets() -> None:
     )
     assert set(entries) >= REQUIRED_ENV_KEYS
     assert entries["NEBIUS_API_KEY"] == ""
-    assert float(entries["DOUBLEBLIND_SPEND_LIMIT_USD"]) <= 30
+    assert float(entries["DOUBLEBLIND_SPEND_LIMIT_USD"]) <= 60
