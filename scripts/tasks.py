@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 VENV = ROOT / ".venv"
 MIN_PYTHON = (3, 12)
-PYTHON_PACKAGES = ("llm", "contract", "broker", "agent")
+PYTHON_PACKAGES = ("llm", "contract", "sandbox", "broker", "agent")
 DASHBOARD = ROOT / "dashboard"
 SPOKES = ROOT / "demo" / "spokes"
 NODE_PROJECTS = (DASHBOARD, ROOT / "demo" / "parcelly")
@@ -20,10 +20,7 @@ MYPY_TARGETS = (
     "tests",
 )
 PENDING_TARGETS = {
-    "up": "M6",
-    "down": "M6",
-    "reset": "M6",
-    "probe": "M6",
+    "reset": "M12",
     "demo-live": "M10",
     "demo-record": "M12",
     "demo-replay": "M12",
@@ -147,6 +144,25 @@ def task_scripted_session() -> None:
     run([require_venv(), "scripts/scripted_session.py"])
 
 
+def task_probe() -> None:
+    run([require_venv(), "scripts/isolation_probe.py"])
+
+
+def docker_compose(*arguments: str) -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        raise SystemExit("docker is required for this task")
+    run([docker, "compose", *arguments])
+
+
+def task_up() -> None:
+    docker_compose("up", "--detach", "--build", "broker")
+
+
+def task_down() -> None:
+    docker_compose("--profile", "party", "down")
+
+
 def task_smoke_demo() -> None:
     run([require_venv(), "scripts/smoke_demo_apps.py"])
 
@@ -173,6 +189,9 @@ TASKS: dict[str, Callable[[], None]] = {
     "smoke-demo": task_smoke_demo,
     "golden": task_golden,
     "scripted-session": task_scripted_session,
+    "probe": task_probe,
+    "up": task_up,
+    "down": task_down,
     **{target: pending(target) for target in PENDING_TARGETS},
 }
 

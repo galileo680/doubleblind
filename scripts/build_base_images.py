@@ -1,0 +1,120 @@
+import argparse
+import asyncio
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from doubleblind_llm.settings import load_dotenv
+from doubleblind_sandbox.costs import LedgerCosts
+from doubleblind_sandbox.docker import DockerSandboxProvider, docker_available
+from doubleblind_sandbox.images import BaseImage, BasePlan, directory_hash, ensure_base_image
+from doubleblind_sandbox.provider import SandboxError, SandboxProvider
+from doubleblind_sandbox.tokenfactory import TokenFactorySandboxProvider
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RECIPES = REPO_ROOT / "sandboxes" / "tokenfactory"
+CONTRACT_PACKAGE = REPO_ROOT / "packages" / "contract"
+BASE_IMAGES_FILES = {
+    "tokenfactory": REPO_ROOT / "volumes" / "base-images.json",
+    "docker": REPO_ROOT / "volumes" / "base-images.docker.json",
+}
+
+
+def party_plans(demo_dir: Path) -> list[BasePlan]:
+    return [
+        BasePlan("spokes", demo_dir / "spokes", RECIPES / "spokes.base.sh"),
+        BasePlan(
+            "parcelly",
+            demo_dir / "parcelly",
+            RECIPES / "parcelly.base.sh",
+            {"/opt/doubleblind/install_node.py": RECIPES / "install_node.py"},
+        ),
+    ]
+
+
+def contract_wheel() -> tuple[dict[str, bytes], str]:
+    with tempfile.TemporaryDirectory() as directory:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "wheel",
+                "--no-deps",
+                "--quiet",
+                "-w",
+                directory,
+                str(CONTRACT_PACKAGE),
+            ],
+            check=True,
+        )
+        wheels = {path.name: path.read_bytes() for path in Path(directory).glob("*.whl")}
+    return wheels, directory_hash(CONTRACT_PACKAGE / "doubleblind_contract")
+
+
+def load_base_images(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    data: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
+    return data
+
+
+def build_provider(kind: str) -> SandboxProvider:
+    if kind == "docker":
+        if not docker_available():
+            raise SandboxError("the Docker daemon is not running")
+        return DockerSandboxProvider()
+    load_dotenv(REPO_ROOT / ".env")
+    return TokenFactorySandboxProvider.from_env(LedgerCosts.from_env(REPO_ROOT))
+
+
+async def build(
+    demo_dir: Path, parties: list[str], force: bool, kind: str = "tokenfactory"
+) -> list[BaseImage]:
+    provider = build_provider(kind)
+    wheels, wheels_digest = contract_wheel()
+    try:
+        plans = [plan for plan in party_plans(demo_dir) if plan.party in parties]
+        results = await asyncio.gather(
+            *(ensure_base_image(provider, plan, wheels, wheels_digest, force) for plan in plans),
+            return_exceptions=True,
+        )
+        failures = [result for result in results if isinstance(result, BaseException)]
+        if failures:
+            raise SandboxError("\n\n".join(str(failure) for failure in failures))
+        return [result for result in results if isinstance(result, BaseImage)]
+    finally:
+        await provider.aclose()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build the base sandbox images of the demo parties"
+    )
+    parser.add_argument("--demo-dir", type=Path, default=REPO_ROOT / "demo")
+    parser.add_argument("--party", action="append", choices=["spokes", "parcelly"])
+    parser.add_argument("--force", action="store_true", help="rebuild even if the tag exists")
+    parser.add_argument("--sandbox", choices=["tokenfactory", "docker"], default="tokenfactory")
+    arguments = parser.parse_args()
+    images = asyncio.run(
+        build(
+            arguments.demo_dir,
+            arguments.party or ["spokes", "parcelly"],
+            arguments.force,
+            arguments.sandbox,
+        )
+    )
+    images_file = BASE_IMAGES_FILES[arguments.sandbox]
+    recorded = load_base_images(images_file)
+    for image in images:
+        recorded[image.party] = image.tag
+        state = f"built for ${image.cost_usd:.4f}" if image.built else "already built"
+        print(f"{image.party}: {image.tag} ({state})")
+    images_file.parent.mkdir(parents=True, exist_ok=True)
+    images_file.write_text(json.dumps(recorded, indent=2), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

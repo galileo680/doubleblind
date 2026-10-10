@@ -1,17 +1,26 @@
 import argparse
+import os
 import sys
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 import uvicorn
 from demo_workspace import REPO_ROOT, Workspace, build_workspace
+from sandbox_party import (
+    PARTIES,
+    ContractTestsInSandbox,
+    SandboxKind,
+    base_heads,
+    sandbox_cost_usd,
+    sandbox_factory,
+)
 from scripted_party import (
     ContractTestsInWorkspace,
     Implementer,
@@ -24,12 +33,14 @@ from doubleblind_broker.app import create_app
 from doubleblind_broker.autopilot import DefaultOptionSimulator
 from doubleblind_broker.contracts import load_yaml, normalized
 from doubleblind_broker.db import build_engine
-from doubleblind_broker.e2e import E2EExecutor, E2ERequest, LocalProcessE2E
-from doubleblind_broker.service import BrokerService, BrokerSettings
+from doubleblind_broker.e2e import E2EExecutor, E2ERequest, LocalProcessE2E, SandboxGatewayE2E
+from doubleblind_broker.service import BrokerService, BrokerSettings, IsolationProbe
 from doubleblind_contract.loader import load_contract_text
 from doubleblind_contract.runtime import RunReport, ScenarioResult, free_port, utc_timestamp
+from doubleblind_sandbox.local import LocalSandboxProvider
 
 PRESET = "spokes-parcelly"
+E2EMode = Literal["gateway", "cleanroom"]
 
 
 class ReportedGreenE2E:
@@ -59,12 +70,12 @@ class SessionOutcome:
 
 
 @contextmanager
-def running_broker(service: BrokerService) -> Iterator[str]:
-    port = free_port()
+def running_broker(
+    service: BrokerService, port: int | None = None, host: str = "127.0.0.1"
+) -> Iterator[str]:
+    port = port or free_port()
     server = uvicorn.Server(
-        uvicorn.Config(
-            create_app(service=service), host="127.0.0.1", port=port, log_level="warning"
-        )
+        uvicorn.Config(create_app(service=service), host=host, port=port, log_level="warning")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -85,6 +96,10 @@ def run_session(
     implementers: dict[str, Implementer],
     autopilot_delay_s: float = 0.2,
     timeout_s: float = 600.0,
+    port: int | None = None,
+    host: str = "127.0.0.1",
+    isolation_probe: IsolationProbe | None = None,
+    after: Callable[[httpx.Client, str], None] | None = None,
 ) -> SessionOutcome:
     settings = BrokerSettings(
         presets_dir=REPO_ROOT / "demo" / "presets",
@@ -92,8 +107,10 @@ def run_session(
         autopilot_delay_s=autopilot_delay_s,
         next_action_wait_s=5.0,
     )
-    service = BrokerService(build_engine("sqlite://"), settings, executor, DefaultOptionSimulator())
-    with running_broker(service) as broker_url:
+    service = BrokerService(
+        build_engine("sqlite://"), settings, executor, DefaultOptionSimulator(), isolation_probe
+    )
+    with running_broker(service, port, host) as broker_url:
         with httpx.Client(base_url=broker_url, timeout=60.0) as admin:
             created = admin.post("/api/v1/sessions", json={"name": "scripted", "preset": PRESET})
             created.raise_for_status()
@@ -125,7 +142,9 @@ def run_session(
             thread.start()
         for thread in threads:
             thread.join(timeout_s)
-        with httpx.Client(base_url=broker_url, timeout=60.0, headers=observer) as viewer:
+        with httpx.Client(base_url=broker_url, timeout=600.0, headers=observer) as viewer:
+            if after is not None:
+                after(viewer, session_id)
             state = viewer.get(f"/api/v1/sessions/{session_id}").json()["state"]
             contract = load_yaml(viewer.get(f"/api/v1/sessions/{session_id}/contract").text)
             certificate = viewer.get(f"/api/v1/sessions/{session_id}/certificate").json()
@@ -146,12 +165,65 @@ def run_full_session(workspace: Workspace, timeout_s: float = 600.0) -> SessionO
     return run_session(executor, implementers, timeout_s=timeout_s)
 
 
-def run_quick_session(timeout_s: float = 120.0) -> SessionOutcome:
+def run_quick_session(
+    timeout_s: float = 120.0,
+    isolation_probe: IsolationProbe | None = None,
+    after: Callable[[httpx.Client, str], None] | None = None,
+) -> SessionOutcome:
     implementers: dict[str, Implementer] = {
         "spokes": ReportedGreen("spokes"),
         "parcelly": ReportedGreen("parcelly"),
     }
-    return run_session(ReportedGreenE2E(), implementers, autopilot_delay_s=0.0, timeout_s=timeout_s)
+    return run_session(
+        ReportedGreenE2E(),
+        implementers,
+        autopilot_delay_s=0.0,
+        timeout_s=timeout_s,
+        isolation_probe=isolation_probe,
+        after=after,
+    )
+
+
+def gateway_url(kind: SandboxKind, port: int) -> str:
+    public = os.environ.get("BROKER_PUBLIC_URL")
+    if public:
+        return public
+    if kind == "tokenfactory":
+        raise RuntimeError(
+            "Token Factory sandboxes reach the gateway only through BROKER_PUBLIC_URL;"
+            " set it or use --e2e cleanroom"
+        )
+    host = "host.docker.internal" if kind == "docker" else "127.0.0.1"
+    return f"http://{host}:{port}"
+
+
+def run_sandbox_session(
+    kind: SandboxKind, e2e_mode: E2EMode, timeout_s: float = 1200.0
+) -> SessionOutcome:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+        root = Path(directory)
+        local_root = root / "sandbox"
+        factory = sandbox_factory(kind, local_root)
+        try:
+            bases = base_heads(kind, factory)
+            implementers: dict[str, Implementer] = {
+                party: ContractTestsInSandbox(factory, party, bases[party]) for party in PARTIES
+            }
+            if e2e_mode == "cleanroom":
+                workspace = build_workspace(root / "cleanroom")
+                try:
+                    executor = LocalProcessE2E(
+                        {"spokes": workspace.spokes, "parcelly": workspace.parcelly}
+                    )
+                    return run_session(executor, implementers, timeout_s=timeout_s)
+                finally:
+                    workspace.remove()
+            port = int(os.environ.get("BROKER_PORT", "0")) or free_port()
+            host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
+            gateway = SandboxGatewayE2E(factory, gateway_url(kind, port))
+            return run_session(gateway, implementers, timeout_s=timeout_s, port=port, host=host)
+        finally:
+            LocalSandboxProvider(local_root).remove_all()
 
 
 def main() -> None:
@@ -159,9 +231,23 @@ def main() -> None:
     parser.add_argument(
         "--quick", action="store_true", help="report green tests instead of running the apps"
     )
+    parser.add_argument(
+        "--sandbox",
+        choices=["local", "tokenfactory", "docker"],
+        default=os.environ.get("DOUBLEBLIND_SANDBOX") or None,
+        help="run each party's code in its own sandbox",
+    )
+    parser.add_argument(
+        "--e2e",
+        choices=["gateway", "cleanroom"],
+        default=os.environ.get("DOUBLEBLIND_E2E_MODE") or "gateway",
+    )
     arguments = parser.parse_args()
+    cost_before = sandbox_cost_usd()
     if arguments.quick:
         outcome = run_quick_session()
+    elif arguments.sandbox:
+        outcome = run_sandbox_session(arguments.sandbox, arguments.e2e)
     else:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             workspace = build_workspace(Path(directory) / "workspace")
@@ -179,6 +265,7 @@ def main() -> None:
     print(f"final state: {outcome.state}")
     print(f"contract equals Appendix A: {outcome.matches_reference}")
     print(f"audit chain ok: {outcome.certificate['audit']['ok']}")
+    print(f"sandbox cost of this run: ${sandbox_cost_usd() - cost_before:.4f}")
     if outcome.state != "CERTIFIED" or not outcome.matches_reference or outcome.errors:
         sys.exit(1)
 

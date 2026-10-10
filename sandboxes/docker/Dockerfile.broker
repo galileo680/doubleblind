@@ -1,0 +1,21 @@
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+
+COPY packages/llm packages/llm
+COPY packages/contract packages/contract
+COPY packages/sandbox packages/sandbox
+COPY packages/broker packages/broker
+COPY demo/presets demo/presets
+COPY config config
+
+RUN pip install \
+    -e packages/llm \
+    -e packages/contract \
+    -e packages/sandbox \
+    -e packages/broker
+
+ENV BROKER_HOST=0.0.0.0 BROKER_PORT=8000
+EXPOSE 8000
+CMD ["python", "-m", "doubleblind_broker"]

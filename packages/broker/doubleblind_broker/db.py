@@ -42,6 +42,7 @@ class PartyRecord(SQLModel, table=True):
     human_token_hash: str = Field(index=True)
     status: str = "waiting"
     binding_yaml: str | None = None
+    workspace_image: str | None = None
     brief_json: str | None = None
     last_turn_status: str | None = None
     last_accepted_version: int | None = None

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -181,11 +181,6 @@ def build_router(service: BrokerService) -> APIRouter:
         service.authorize(caller, session_id)
         return EventSourceResponse(stream(service, request, caller, session_id, since, follow))
 
-    @router.post("/sessions/{session_id}/isolation-probe")
-    async def isolation_probe(session_id: str, caller: Caller) -> dict[str, Any]:
-        service.authorize(caller, session_id, "observer", "admin")
-        raise BrokerError(501, "NOT_AVAILABLE", "isolation probes arrive with the sandboxes (M6)")
-
     @router.get("/sessions/{session_id}/audit/verify")
     async def audit(session_id: str, caller: Caller) -> dict[str, Any]:
         return service.audit(caller, session_id)
@@ -193,6 +188,64 @@ def build_router(service: BrokerService) -> APIRouter:
     @router.get("/sessions/{session_id}/certificate")
     async def certificate(session_id: str, caller: Caller) -> dict[str, Any]:
         return service.certificate(caller, session_id)
+
+    @router.post("/sessions/{session_id}/relay-tokens", status_code=201)
+    async def relay_tokens(session_id: str, caller: Caller) -> dict[str, str]:
+        return service.issue_relay_tokens(caller, session_id)
+
+    @router.post("/sessions/{session_id}/isolation-probe")
+    async def isolation_probe(session_id: str, caller: Caller) -> dict[str, Any]:
+        return await service.run_isolation_probe(caller, session_id)
+
+    return router
+
+
+def build_gateway_router(service: BrokerService) -> APIRouter:
+    router = APIRouter()
+    gateway = service.gateway
+
+    @router.api_route(
+        "/gw/{session_id}/{party}/{path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    )
+    async def forward(session_id: str, party: str, path: str, request: Request) -> Response:
+        relayed = await gateway.forward(
+            session_id,
+            party,
+            request.method,
+            f"/{path}",
+            request.url.query,
+            dict(request.headers),
+            await request.body(),
+        )
+        content_type = next(
+            (value for key, value in relayed.headers.items() if key.lower() == "content-type"),
+            None,
+        )
+        return Response(relayed.body, relayed.status, media_type=content_type)
+
+    @router.get("/relay/{session_id}/{party}/next")
+    async def next_request(
+        session_id: str,
+        party: str,
+        x_relay_token: Annotated[str | None, Header()] = None,
+        wait: Annotated[float, Query(ge=0, le=60)] = 25,
+    ) -> Response:
+        item = await gateway.next_request(session_id, party, x_relay_token, wait)
+        if item is None:
+            return Response(status_code=204)
+        return JSONResponse(item)
+
+    @router.post("/relay/{session_id}/{party}/responses/{request_id}")
+    async def relay_response(
+        session_id: str,
+        party: str,
+        request_id: str,
+        body: dict[str, Any],
+        x_relay_token: Annotated[str | None, Header()] = None,
+    ) -> dict[str, str]:
+        gateway.respond(session_id, party, x_relay_token, request_id, body)
+        return {"status": "delivered"}
 
     return router
 

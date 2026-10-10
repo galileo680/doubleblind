@@ -1,0 +1,18 @@
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+WORKDIR /app
+
+COPY packages/llm packages/llm
+COPY packages/contract packages/contract
+COPY packages/sandbox packages/sandbox
+COPY packages/agent packages/agent
+COPY config config
+
+RUN pip install \
+    -e packages/llm \
+    -e packages/contract \
+    -e packages/sandbox \
+    -e packages/agent
+
+CMD ["python", "-m", "doubleblind_agent"]

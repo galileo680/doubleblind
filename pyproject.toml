@@ -7,7 +7,7 @@ extend-exclude = ["dashboard", "demo/parcelly", "volumes", "docs", "ideas"]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "ERA", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["doubleblind_llm", "doubleblind_contract", "doubleblind_broker", "doubleblind_agent", "app"]
+known-first-party = ["doubleblind_llm", "doubleblind_contract", "doubleblind_sandbox", "doubleblind_broker", "doubleblind_agent", "app"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -19,9 +19,12 @@ no_implicit_optional = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]
-pythonpath = ["packages/llm/tests", "packages/contract/tests", "packages/broker/tests", "scripts"]
-addopts = "--import-mode=importlib -q -m 'not golden'"
+pythonpath = ["packages/llm/tests", "packages/contract/tests", "packages/sandbox/tests", "packages/broker/tests", "scripts"]
+addopts = "--import-mode=importlib -q -m 'not golden and not sandbox'"
 norecursedirs = [".*", "build", "dist", "node_modules", "venv", "*.egg", "reference_impl"]
-markers = ["golden: slow end-to-end runs of the contract runner against the reference implementations"]
+markers = [
+  "golden: slow end-to-end runs of the contract runner against the reference implementations",
+  "sandbox: runs on real Token Factory sandboxes and costs money, started by hand",
+]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

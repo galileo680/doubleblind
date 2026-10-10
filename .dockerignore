@@ -1,0 +1,17 @@
+.env
+.env.*
+.git
+.venv
+.claude
+docs
+ideas
+reports
+research_notes
+volumes
+dashboard/node_modules
+demo/parcelly/node_modules
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/*.db

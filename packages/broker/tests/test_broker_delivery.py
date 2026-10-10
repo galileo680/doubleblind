@@ -223,5 +223,8 @@ def test_observer_only_actions() -> None:
         probe = session.post("/isolation-probe", "observer")
         agent_probe = session.post("/isolation-probe", "agent_spokes")
 
-    assert probe.status_code == 501
+    assert probe.status_code == 200
+    assert probe.json()["ok"] is True
+    assert [result["status"] for result in probe.json()["results"]] == ["passed", "passed"]
+    assert {result["actual"] for result in probe.json()["results"]} == {"403"}
     assert agent_probe.status_code == 403

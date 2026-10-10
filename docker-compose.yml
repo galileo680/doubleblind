@@ -1,0 +1,45 @@
+name: doubleblind
+
+services:
+  broker:
+    build:
+      context: .
+      dockerfile: sandboxes/docker/Dockerfile.broker
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DOUBLEBLIND_BROKER_DB: sqlite:////app/volumes/broker.db
+      DOUBLEBLIND_SANDBOX: ${DOUBLEBLIND_SANDBOX:-tokenfactory}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./volumes:/app/volumes
+
+  party-spokes:
+    build:
+      context: .
+      dockerfile: sandboxes/docker/Dockerfile.party
+    profiles: [party]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DOUBLEBLIND_PARTY: spokes
+      BROKER_URL: http://broker:8000
+    depends_on:
+      - broker
+
+  party-parcelly:
+    build:
+      context: .
+      dockerfile: sandboxes/docker/Dockerfile.party
+    profiles: [party]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DOUBLEBLIND_PARTY: parcelly
+      BROKER_URL: http://broker:8000
+    depends_on:
+      - broker

@@ -2,7 +2,12 @@ from pathlib import Path
 
 import pytest
 from demo_workspace import build_workspace
-from scripted_session import SessionOutcome, run_full_session, run_quick_session
+from scripted_session import (
+    SessionOutcome,
+    run_full_session,
+    run_quick_session,
+    run_sandbox_session,
+)
 
 
 def assert_reference_session(outcome: SessionOutcome) -> None:
@@ -52,3 +57,23 @@ def test_scripted_session_with_real_tests_and_apps(tmp_path: Path) -> None:
     assert [scenario["id"] for scenario in e2e["scenarios"]] == ["E1", "E2"]
     assert outcome.certificate["results"]["consumer"]["summary"]["passed"] == 9
     assert outcome.certificate["results"]["provider"]["summary"]["passed"] == 4
+
+
+@pytest.mark.golden
+def test_session_with_local_sandboxes_and_gateway_e2e() -> None:
+    outcome = run_sandbox_session("local", "gateway")
+
+    assert_reference_session(outcome)
+    gateway = [event["payload"] for event in outcome.events if event["type"] == "gateway.request"]
+    assert {event["party"] for event in gateway} == {"spokes", "parcelly"}
+    assert all(event["allowed"] for event in gateway)
+    assert all(event["violations"] == [] for event in gateway)
+    e2e = outcome.certificate["results"]["e2e"]["results"]
+    assert [scenario["status"] for scenario in e2e["scenarios"]] == ["passed", "passed"]
+
+
+@pytest.mark.sandbox
+def test_session_with_token_factory_sandboxes() -> None:
+    outcome = run_sandbox_session("tokenfactory", "cleanroom")
+
+    assert_reference_session(outcome)

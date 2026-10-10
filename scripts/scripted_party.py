@@ -248,13 +248,17 @@ class ContractTestsInWorkspace:
 
 
 def test_run_payload(report: RunReport, binding_yaml: str) -> dict[str, Any]:
+    return payload_from_report(report.to_dict(include_logs=False), binding_yaml)
+
+
+def payload_from_report(report: Mapping[str, Any], binding_yaml: str) -> dict[str, Any]:
     results = []
-    for item in report.scenarios:
-        result: dict[str, Any] = {"scenario_id": item.id, "status": item.status}
-        if item.failures:
-            result["sanitized_reason"] = item.failures[0].message[:REASON_LENGTH]
+    for item in report["scenarios"]:
+        result: dict[str, Any] = {"scenario_id": item["id"], "status": item["status"]}
+        if item["failures"]:
+            result["sanitized_reason"] = item["failures"][0]["message"][:REASON_LENGTH]
         results.append(result)
-    return {"summary": report.summary, "results": results, "binding_yaml": binding_yaml}
+    return {"summary": report["summary"], "results": results, "binding_yaml": binding_yaml}
 
 
 class ScriptedParty:

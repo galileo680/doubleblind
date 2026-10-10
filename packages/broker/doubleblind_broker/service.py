@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NoReturn, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine
@@ -26,6 +26,12 @@ from doubleblind_broker.db import (
 )
 from doubleblind_broker.e2e import E2EExecutor, E2ERequest, UnavailableE2E
 from doubleblind_broker.events import EventLog, utc_now
+from doubleblind_broker.gateway import (
+    Allowlist,
+    GatewayError,
+    IntegrationGateway,
+    build_allowlist,
+)
 from doubleblind_broker.presets import Preset, PresetNotFoundError, load_preset
 from doubleblind_broker.state_machine import (
     NEGOTIATION_STATES,
@@ -42,10 +48,11 @@ from doubleblind_contract.guard_rules import (
     check_test_run,
     check_turn,
 )
-from doubleblind_contract.loader import load_contract_text
+from doubleblind_contract.loader import ContractLoadError, load_binding_text, load_contract_text
 from doubleblind_contract.models import Contract
 from doubleblind_contract.runtime import RunReport
 from doubleblind_contract.validate import check_binding_text
+from doubleblind_sandbox.provider import ProbeResult
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +73,13 @@ class BrokerError(Exception):
         if self.details is not None:
             body["details"] = self.details
         return body
+
+
+PROBE_PATH = "/__isolation-probe/not-in-contract"
+
+
+class IsolationProbe(Protocol):
+    async def run(self) -> list[ProbeResult]: ...
 
 
 class QuestionIn(BaseModel):
@@ -105,6 +119,7 @@ class TestRunIn(BaseModel):
     summary: dict[str, int] = Field(default_factory=dict)
     results: list[ScenarioResultIn]
     binding_yaml: str | None = None
+    workspace_image: str | None = Field(default=None, pattern=r"^[A-Za-z0-9:._/@-]{1,200}$")
 
 
 class ContractGapIn(BaseModel):
@@ -146,9 +161,11 @@ class BrokerService:
         settings: BrokerSettings,
         e2e_executor: E2EExecutor | None = None,
         simulator: HumanSimulator | None = None,
+        isolation_probe: IsolationProbe | None = None,
     ) -> None:
         self.engine = engine
         self.settings = settings
+        self.isolation_probe = isolation_probe
         self.e2e_executor: E2EExecutor = e2e_executor or UnavailableE2E()
         self.simulator: HumanSimulator = simulator or DefaultOptionSimulator()
         self.events = EventLog(engine)
@@ -157,6 +174,7 @@ class BrokerService:
         self.changes: dict[str, asyncio.Event] = {}
         self.background: set[asyncio.Task[None]] = set()
         self.presets: dict[str, Preset] = {}
+        self.gateway = IntegrationGateway(self.gateway_allowlist, self.gateway_event)
 
     def preset(self, name: str) -> Preset:
         if name not in self.presets:
@@ -1017,12 +1035,14 @@ class BrokerService:
                 self.guard(
                     record,
                     party.party_key,
-                    check_test_run(run.model_dump(), preset.allowlist()),
+                    check_test_run(run.model_dump(exclude={"workspace_image"}), preset.allowlist()),
                     outbox,
                     db,
                 )
                 if run.binding_yaml is not None:
                     self.accept_binding(party, run.binding_yaml)
+                if run.workspace_image is not None:
+                    party.workspace_image = run.workspace_image
                 db.add(
                     TestRunRecord(
                         session_id=session_id,
@@ -1135,6 +1155,15 @@ class BrokerService:
             consumer_binding=consumer.binding_yaml,
             provider_binding=provider.binding_yaml,
             secrets=json.loads(record.secrets_json),
+            images={
+                party.party_key: party.workspace_image
+                for party in (consumer, provider)
+                if party.workspace_image is not None
+            },
+            relay_tokens={
+                party.party_key: self.gateway.issue_token(session_id, party.party_key)
+                for party in (consumer, provider)
+            },
         )
 
     async def trigger_e2e(self, principal: Principal, session_id: str) -> dict[str, Any]:
@@ -1156,6 +1185,8 @@ class BrokerService:
             failure = {"scenario": "E2E", "message": f"{type(error).__name__}: {error}"}
             await self.finish_e2e(session_id, None, failure)
             return
+        finally:
+            self.gateway.revoke(session_id)
         await self.finish_e2e(session_id, report, None)
 
     async def finish_e2e(
@@ -1278,3 +1309,63 @@ class BrokerService:
             "audit": self.events.verify(session_id).to_dict(),
             "metrics": self.metrics(record),
         }
+
+    def gateway_allowlist(self, session_id: str, party_key: str) -> Allowlist | None:
+        with open_session(self.engine) as db:
+            record = db.get(SessionRecord, session_id)
+            if record is None or record.signed_contract_version is None:
+                return None
+            party = next(
+                (p for p in self.roles(db, session_id).values() if p.party_key == party_key), None
+            )
+            if party is None:
+                return None
+            contract_yaml = self.contract_text(db, session_id, record.signed_contract_version)
+            binding_yaml = party.binding_yaml
+        try:
+            contract = load_contract_text(contract_yaml)
+            binding = load_binding_text(binding_yaml) if binding_yaml else None
+        except ContractLoadError:
+            return None
+        return build_allowlist(contract, binding, party.role)
+
+    def gateway_event(self, session_id: str, payload: dict[str, Any]) -> None:
+        self.events.append(session_id, "gateway.request", "broker", payload)
+        self.notify(session_id)
+
+    def issue_relay_tokens(self, principal: Principal, session_id: str) -> dict[str, str]:
+        self.authorize(principal, session_id, "observer", "admin")
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            if record.signed_contract_version is None:
+                raise BrokerError(
+                    409, "NOT_SIGNED", "the gateway opens after the contract is signed"
+                )
+            parties = [party.party_key for party in self.roles(db, session_id).values()]
+        return {party: self.gateway.issue_token(session_id, party) for party in parties}
+
+    async def gateway_probe(self, session_id: str, party_key: str) -> ProbeResult:
+        name = f"gateway request to {party_key} outside the contract"
+        try:
+            await self.gateway.forward(session_id, party_key, "GET", PROBE_PATH, "", {}, b"")
+        except GatewayError as error:
+            return ProbeResult(
+                name, "403", str(error.status), "passed" if error.status == 403 else "failed"
+            )
+        return ProbeResult(name, "403", "forwarded", "failed")
+
+    async def run_isolation_probe(self, principal: Principal, session_id: str) -> dict[str, Any]:
+        self.authorize(principal, session_id, "observer", "admin")
+        with open_session(self.engine) as db:
+            parties = [party.party_key for party in self.roles(db, session_id).values()]
+        results = [await self.gateway_probe(session_id, party) for party in parties]
+        if self.isolation_probe is not None:
+            results += await self.isolation_probe.run()
+        payload = {
+            "ok": all(result.status != "failed" for result in results),
+            "results": [result.to_dict() for result in results],
+        }
+        outbox = Outbox()
+        outbox.add("isolation.probe", "broker", payload)
+        self.flush(session_id, outbox)
+        return payload
