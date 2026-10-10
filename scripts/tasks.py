@@ -139,6 +139,10 @@ def task_test() -> None:
     run_npm_script("test")
 
 
+def task_golden() -> None:
+    run([require_venv(), "-m", "pytest", "-m", "golden", "packages/contract"])
+
+
 def task_smoke_demo() -> None:
     run([require_venv(), "scripts/smoke_demo_apps.py"])
 
@@ -163,6 +167,7 @@ TASKS: dict[str, Callable[[], None]] = {
     "build": task_build,
     "check-comments": task_check_comments,
     "smoke-demo": task_smoke_demo,
+    "golden": task_golden,
     **{target: pending(target) for target in PENDING_TARGETS},
 }
 
