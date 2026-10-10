@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from golden_support import CONTRACT, Workspace, build_workspace, run_repository_tests
+from demo_workspace import REFERENCE_CONTRACT, Workspace, build_workspace, run_repository_tests
 
 from doubleblind_contract.runner import run_consumer_tests, run_e2e_tests, run_provider_tests
 from doubleblind_contract.runtime import RunReport
@@ -80,14 +80,14 @@ def test_reference_implementations_keep_the_repository_tests_green(reference: Wo
 
 
 def test_reference_consumer_passes_every_consumer_scenario(reference: Workspace) -> None:
-    report = run_consumer_tests(CONTRACT, reference.consumer_binding, env=reference.env())
+    report = run_consumer_tests(REFERENCE_CONTRACT, reference.consumer_binding, env=reference.env())
 
     assert scenario_ids(report) == CONSUMER_SCENARIOS
     assert report.ok, explain(report)
 
 
 def test_reference_provider_passes_every_provider_scenario(reference: Workspace) -> None:
-    report = run_provider_tests(CONTRACT, reference.provider_binding, env=reference.env())
+    report = run_provider_tests(REFERENCE_CONTRACT, reference.provider_binding, env=reference.env())
 
     assert scenario_ids(report) == PROVIDER_SCENARIOS
     assert report.ok, explain(report)
@@ -95,7 +95,7 @@ def test_reference_provider_passes_every_provider_scenario(reference: Workspace)
 
 def test_both_reference_apps_pass_the_end_to_end_scenarios(reference: Workspace) -> None:
     report = run_e2e_tests(
-        CONTRACT,
+        REFERENCE_CONTRACT,
         reference.consumer_binding,
         reference.provider_binding,
         env=reference.env(),
@@ -113,7 +113,9 @@ def test_each_mutation_turns_exactly_the_expected_scenarios_red(
     relative_path, old, new, expected = MUTATIONS[name]
 
     with reference.mutated(relative_path, old, new):
-        report = run_consumer_tests(CONTRACT, reference.consumer_binding, env=reference.env())
+        report = run_consumer_tests(
+            REFERENCE_CONTRACT, reference.consumer_binding, env=reference.env()
+        )
 
     assert failed(report) == expected, explain(report)
     assert all(
@@ -126,7 +128,7 @@ def test_kg_mutation_reports_the_exact_field(reference: Workspace) -> None:
 
     with reference.mutated(relative_path, old, new):
         report = run_consumer_tests(
-            CONTRACT, reference.consumer_binding, scenario_ids=["S1"], env=reference.env()
+            REFERENCE_CONTRACT, reference.consumer_binding, scenario_ids=["S1"], env=reference.env()
         )
 
     failure = report.scenarios[0].failures[0]
@@ -140,14 +142,16 @@ def test_provider_without_the_flag_fails_only_the_idempotency_scenario(
     flag_check = "if (!idempotencyKey && partner.flags.require_idempotency_key) {"
 
     with reference.mutated("parcelly/src/shipments.js", flag_check, "if (false) {"):
-        report = run_provider_tests(CONTRACT, reference.provider_binding, env=reference.env())
+        report = run_provider_tests(
+            REFERENCE_CONTRACT, reference.provider_binding, env=reference.env()
+        )
 
     assert failed(report) == {"P1"}, explain(report)
     assert report.scenarios[0].failures[0].path == "status"
 
 
 def test_untouched_demo_fails_with_readable_errors_not_crashes(untouched: Workspace) -> None:
-    report = run_consumer_tests(CONTRACT, untouched.consumer_binding, env=untouched.env())
+    report = run_consumer_tests(REFERENCE_CONTRACT, untouched.consumer_binding, env=untouched.env())
 
     assert {scenario.status for scenario in report.scenarios} == {"failed"}
     first = report.scenarios[0].failures[0]
@@ -159,7 +163,7 @@ def test_untouched_demo_fails_with_readable_errors_not_crashes(untouched: Worksp
 def test_untouched_provider_fails_only_where_the_contract_needs_new_code(
     untouched: Workspace,
 ) -> None:
-    report = run_provider_tests(CONTRACT, untouched.provider_binding, env=untouched.env())
+    report = run_provider_tests(REFERENCE_CONTRACT, untouched.provider_binding, env=untouched.env())
 
     assert failed(report) == {"P1"}, explain(report)
 
@@ -169,7 +173,7 @@ def test_missing_secret_is_a_configuration_error(reference: Workspace, tmp_path:
     del env["DOUBLEBLIND_SECRET_WEBHOOK_SECRET"]
 
     with pytest.raises(Exception, match="DOUBLEBLIND_SECRET_WEBHOOK_SECRET"):
-        run_consumer_tests(CONTRACT, reference.consumer_binding, env=env)
+        run_consumer_tests(REFERENCE_CONTRACT, reference.consumer_binding, env=env)
 
 
 def test_cli_runs_provider_tests_and_writes_reports(reference: Workspace, tmp_path: Path) -> None:
@@ -184,7 +188,7 @@ def test_cli_runs_provider_tests_and_writes_reports(reference: Workspace, tmp_pa
         [
             "test",
             "provider",
-            str(CONTRACT),
+            str(REFERENCE_CONTRACT),
             "--binding",
             str(reference.provider_binding),
             "--scenarios",

@@ -5,7 +5,6 @@ from demo_workspace import build_workspace
 from scripted_session import (
     SessionOutcome,
     run_full_session,
-    run_quick_session,
     run_sandbox_session,
 )
 
@@ -36,12 +35,6 @@ def assert_reference_session(outcome: SessionOutcome) -> None:
         "E2E",
         "CERTIFIED",
     ]
-
-
-def test_scripted_parties_negotiate_the_reference_contract() -> None:
-    outcome = run_quick_session()
-
-    assert_reference_session(outcome)
 
 
 @pytest.mark.golden

@@ -19,7 +19,7 @@ no_implicit_optional = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]
-pythonpath = ["packages/llm/tests", "packages/contract/tests", "packages/sandbox/tests", "packages/broker/tests", "scripts"]
+pythonpath = ["scripts"]
 addopts = "--import-mode=importlib -q -m 'not golden and not sandbox'"
 norecursedirs = [".*", "build", "dist", "node_modules", "venv", "*.egg", "reference_impl"]
 markers = [
