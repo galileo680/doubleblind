@@ -1,5 +1,4 @@
 import json
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -13,7 +12,7 @@ from doubleblind_llm.capabilities import (
 )
 from doubleblind_llm.client import LLMClient
 from doubleblind_llm.domain import RawCompletion
-from doubleblind_llm.parsing import REASONING_FIELDS, parse_structured, split_reasoning
+from doubleblind_llm.parsing import parse_structured, split_reasoning
 from doubleblind_llm.settings import ModelSpec
 
 DOCTOR_ROLE = "doctor"
@@ -37,18 +36,6 @@ PROBE_SCHEMA = {
     "additionalProperties": False,
 }
 THINKING_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
-
-
-class ProbeFailed(Exception):
-    pass
-
-
-def reasoning_fields_in(raw: RawCompletion) -> list[str]:
-    return [
-        field
-        for field in REASONING_FIELDS
-        if isinstance(raw.message.get(field), str) and raw.message[field].strip()
-    ]
 
 
 def has_reasoning(raw: RawCompletion) -> bool:
@@ -83,51 +70,25 @@ class Doctor:
             self.errors.append(f"{label}: {type(error).__name__}")
         return None
 
-    async def detect_thinking(self, model: ModelSpec) -> tuple[ThinkingCapability, int | None]:
-        default = await self.probe(model, "thinking_default", {"messages": PING, "max_tokens": 400})
-        fields = reasoning_fields_in(default) if default else []
-        toggle: ThinkingToggle = "none"
-        latency: int | None = None
+    async def detect_thinking(self, model: ModelSpec) -> tuple[ThinkingToggle, int | None]:
         disabled = await self.probe(
             model,
             "thinking_off",
             {"messages": PING, "max_tokens": 64, "extra_body": THINKING_OFF},
         )
         if disabled and answered_pong(disabled) and not has_reasoning(disabled):
-            toggle = "chat_template_kwargs"
-            latency = disabled.latency_ms
-        else:
-            prompted = await self.probe(
-                model,
-                "thinking_off_prompt",
-                {
-                    "messages": [{"role": "system", "content": "/no_think"}, *PING],
-                    "max_tokens": 64,
-                },
-            )
-            if prompted and answered_pong(prompted) and not has_reasoning(prompted):
-                toggle = "system_prompt"
-                latency = prompted.latency_ms
-        budget = await self.probe(
+            return "chat_template_kwargs", disabled.latency_ms
+        prompted = await self.probe(
             model,
-            "reasoning_budget",
+            "thinking_off_prompt",
             {
-                "messages": PING,
-                "max_tokens": 400,
-                "extra_body": {
-                    "chat_template_kwargs": {"enable_thinking": True},
-                    "reasoning_budget": 64,
-                },
+                "messages": [{"role": "system", "content": "/no_think"}, *PING],
+                "max_tokens": 64,
             },
         )
-        if latency is None and default is not None:
-            latency = default.latency_ms
-        capability = ThinkingCapability(
-            toggle=toggle,
-            reasoning_fields=fields or list(REASONING_FIELDS),
-            reasoning_budget_param=budget is not None,
-        )
-        return capability, latency
+        if prompted and answered_pong(prompted) and not has_reasoning(prompted):
+            return "system_prompt", prompted.latency_ms
+        return "none", None
 
     async def detect_tools(self, model: ModelSpec, extra: dict[str, Any]) -> bool:
         raw = await self.probe(
@@ -176,8 +137,8 @@ class Doctor:
                 json_schema=False,
                 errors=["model is not listed by GET /v1/models"],
             )
-        thinking, latency = await self.detect_thinking(model)
-        extra = {"extra_body": THINKING_OFF} if thinking.toggle == "chat_template_kwargs" else {}
+        toggle, latency = await self.detect_thinking(model)
+        extra = {"extra_body": THINKING_OFF} if toggle == "chat_template_kwargs" else {}
         native_tools = await self.detect_tools(model, extra)
         json_schema = await self.detect_json_schema(model, extra)
         return ModelCapabilities(
@@ -186,18 +147,17 @@ class Doctor:
             available=True,
             native_tools=native_tools,
             json_schema=json_schema,
-            thinking=thinking,
+            thinking=ThinkingCapability(toggle=toggle),
             latency_ms=latency,
             errors=list(self.errors),
         )
 
-    async def run(self, aliases: Sequence[str] | None = None) -> CapabilityReport:
+    async def run(self) -> CapabilityReport:
         settings = self.client.settings
-        selected = list(aliases) if aliases else list(settings.models)
         listed = await self.client.list_model_ids()
         results = {
-            alias: await self.examine(settings.model(alias), settings.model(alias).id in listed)
-            for alias in selected
+            alias: await self.examine(model, model.id in listed)
+            for alias, model in settings.models.items()
         }
         return CapabilityReport(
             generated_at=datetime.now(UTC).isoformat(),

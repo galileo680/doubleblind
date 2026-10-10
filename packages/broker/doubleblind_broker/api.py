@@ -8,13 +8,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
-from doubleblind_broker.service import (
-    BrokerError,
-    BrokerService,
-    ContractGapIn,
-    TestRunIn,
-    TurnIn,
-)
+from doubleblind_broker.service import BrokerService, ContractGapIn, TestRunIn, TurnIn
 from doubleblind_broker.tokens import Principal
 
 STREAM_POLL_S = 15.0
@@ -25,7 +19,6 @@ class CreateSessionIn(BaseModel):
 
     name: str = Field(min_length=1)
     preset: str = Field(min_length=1)
-    max_rounds: int | None = Field(default=None, ge=2)
 
 
 class AnswerIn(BaseModel):
@@ -75,11 +68,11 @@ def build_router(service: BrokerService) -> APIRouter:
     async def create_session(
         body: CreateSessionIn, caller: Annotated[Principal, Depends(optional_principal)]
     ) -> dict[str, Any]:
-        return await service.create_session(caller, body.name, body.preset, body.max_rounds)
+        return service.create_session(caller, body.name, body.preset)
 
     @router.post("/sessions/{session_id}/start")
     async def start(session_id: str, caller: Caller) -> dict[str, Any]:
-        return await service.start(caller, session_id)
+        return service.start(caller, session_id)
 
     @router.get("/sessions/{session_id}")
     async def session_view(session_id: str, caller: Caller) -> dict[str, Any]:
@@ -95,19 +88,15 @@ def build_router(service: BrokerService) -> APIRouter:
     async def submit_brief(
         session_id: str, brief: dict[str, Any], caller: Caller
     ) -> dict[str, Any]:
-        return await service.submit_brief(caller, session_id, brief)
-
-    @router.get("/sessions/{session_id}/briefs/mine")
-    async def own_brief(session_id: str, caller: Caller) -> dict[str, Any]:
-        return service.own_brief(caller, session_id, counterparty=False)
+        return service.submit_brief(caller, session_id, brief)
 
     @router.get("/sessions/{session_id}/briefs/counterparty")
     async def counterparty_brief(session_id: str, caller: Caller) -> dict[str, Any]:
-        return service.own_brief(caller, session_id, counterparty=True)
+        return service.counterparty_brief(caller, session_id)
 
     @router.post("/sessions/{session_id}/turns", status_code=201)
     async def submit_turn(session_id: str, turn: TurnIn, caller: Caller) -> dict[str, Any]:
-        return await service.submit_turn(caller, session_id, turn)
+        return service.submit_turn(caller, session_id, turn)
 
     @router.get("/sessions/{session_id}/turns")
     async def list_turns(session_id: str, caller: Caller) -> list[dict[str, Any]]:
@@ -132,37 +121,29 @@ def build_router(service: BrokerService) -> APIRouter:
     async def questions(session_id: str, caller: Caller) -> list[dict[str, Any]]:
         return service.list_questions(caller, session_id)
 
-    @router.post("/sessions/{session_id}/questions/{qid}/answer")
-    async def answer_in_session(
-        session_id: str, qid: str, body: AnswerIn, caller: Caller
-    ) -> dict[str, Any]:
-        return await service.answer_question(caller, session_id, qid, body.answer)
-
     @router.post("/questions/{qid}/answer")
     async def answer(qid: str, body: AnswerIn, caller: Caller) -> dict[str, Any]:
-        if caller.session_id is None:
-            raise BrokerError(400, "SESSION_REQUIRED", "use /sessions/{id}/questions/{qid}/answer")
-        return await service.answer_question(caller, caller.session_id, qid, body.answer)
+        return service.answer_question(caller, qid, body.answer)
 
     @router.post("/sessions/{session_id}/resume")
     async def resume(session_id: str, body: ResumeIn, caller: Caller) -> dict[str, Any]:
-        return await service.resume(caller, session_id, body.extra_rounds)
+        return service.resume(caller, session_id, body.extra_rounds)
 
     @router.post("/sessions/{session_id}/signatures", status_code=201)
     async def sign(session_id: str, body: SignatureIn, caller: Caller) -> dict[str, Any]:
-        return await service.sign(caller, session_id, body.version)
+        return service.sign(caller, session_id, body.version)
 
     @router.post("/sessions/{session_id}/test-runs", status_code=201)
     async def test_run(session_id: str, run: TestRunIn, caller: Caller) -> dict[str, Any]:
-        return await service.submit_test_run(caller, session_id, run)
+        return service.submit_test_run(caller, session_id, run)
 
     @router.post("/sessions/{session_id}/contract-gap", status_code=201)
     async def contract_gap(session_id: str, gap: ContractGapIn, caller: Caller) -> dict[str, Any]:
-        return await service.contract_gap(caller, session_id, gap)
+        return service.contract_gap(caller, session_id, gap)
 
     @router.post("/sessions/{session_id}/e2e/run", status_code=202)
     async def run_e2e(session_id: str, caller: Caller) -> dict[str, Any]:
-        return await service.trigger_e2e(caller, session_id)
+        return service.trigger_e2e(caller, session_id)
 
     @router.get("/sessions/{session_id}/events")
     async def events(
@@ -188,10 +169,6 @@ def build_router(service: BrokerService) -> APIRouter:
     @router.get("/sessions/{session_id}/certificate")
     async def certificate(session_id: str, caller: Caller) -> dict[str, Any]:
         return service.certificate(caller, session_id)
-
-    @router.post("/sessions/{session_id}/relay-tokens", status_code=201)
-    async def relay_tokens(session_id: str, caller: Caller) -> dict[str, str]:
-        return service.issue_relay_tokens(caller, session_id)
 
     @router.post("/sessions/{session_id}/isolation-probe")
     async def isolation_probe(session_id: str, caller: Caller) -> dict[str, Any]:

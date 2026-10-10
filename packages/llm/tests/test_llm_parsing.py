@@ -8,12 +8,7 @@ from doubleblind_llm.parsing import (
     parse_structured,
     split_reasoning,
 )
-from doubleblind_llm.pricing import (
-    cost_usd,
-    estimate_prompt_tokens,
-    estimate_tokens,
-    upper_bound_cost_usd,
-)
+from doubleblind_llm.pricing import cost_usd, estimate_prompt_tokens
 from doubleblind_llm.settings import Price
 
 SCHEMA = {
@@ -95,6 +90,4 @@ def test_fallback_tool_calls_ignore_unknown_tools() -> None:
 def test_cost_and_estimates() -> None:
     price = Price(input_per_m=1.0, output_per_m=3.0)
     assert cost_usd(price, Usage(prompt_tokens=1_000_000, completion_tokens=0)) == 1.0
-    assert upper_bound_cost_usd(price, 1000, 2000) == pytest.approx(0.007)
-    assert estimate_tokens("abcdefg") == 2
     assert estimate_prompt_tokens({"messages": [], "max_tokens": 10_000}) == 5

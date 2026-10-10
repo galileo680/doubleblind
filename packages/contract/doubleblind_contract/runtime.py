@@ -1,7 +1,6 @@
-import os
 import socket
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -26,15 +25,6 @@ class Failure:
     actual: Any
     message: str
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "step": self.step,
-            "path": self.path,
-            "expected": self.expected,
-            "actual": self.actual,
-            "message": self.message,
-        }
-
     def render(self) -> str:
         where = "after all steps" if self.step is None else f"step {self.step}"
         location = f" {self.path}:" if self.path else ""
@@ -54,15 +44,9 @@ class ScenarioResult:
     app_log_tail: str = ""
 
     def to_dict(self, include_logs: bool = True) -> dict[str, Any]:
-        data: dict[str, Any] = {
-            "id": self.id,
-            "title": self.title,
-            "status": self.status,
-            "duration_ms": self.duration_ms,
-            "failures": [failure.to_dict() for failure in self.failures],
-        }
-        if include_logs:
-            data["app_log_tail"] = self.app_log_tail
+        data = asdict(self)
+        if not include_logs:
+            del data["app_log_tail"]
         return data
 
 
@@ -85,9 +69,6 @@ class RunReport:
     @property
     def ok(self) -> bool:
         return all(scenario.status == "passed" for scenario in self.scenarios)
-
-    def statuses(self) -> dict[str, ScenarioStatus]:
-        return {scenario.id: scenario.status for scenario in self.scenarios}
 
     def to_dict(self, include_logs: bool = True) -> dict[str, Any]:
         return {
@@ -136,10 +117,3 @@ def read_env_file(path: Path) -> dict[str, str]:
         key, _, value = line.partition("=")
         values[key.strip()] = value.strip().strip('"').strip("'")
     return values
-
-
-def runner_env(env_files: Sequence[Path] = ()) -> dict[str, str]:
-    env = dict(os.environ)
-    for path in env_files:
-        env.update(read_env_file(path))
-    return env

@@ -16,10 +16,7 @@ def kilograms_to_grams(weight_kg: float) -> int:
 
 
 def size_for(weight_g: int) -> str:
-    for size, limit in SIZE_LIMITS_G:
-        if weight_g <= limit:
-            return size
-    return "C"
+    return next(size for size, limit in SIZE_LIMITS_G if weight_g <= limit)
 
 
 def normalize_phone(phone: str) -> str | None:

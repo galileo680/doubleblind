@@ -31,7 +31,6 @@ def test_guard_rejects_spend_over_limit(ledger: Ledger) -> None:
         guard.check(1.5)
     with pytest.raises(BudgetExceededError):
         guard.check(0.5, reserved_usd=0.6)
-    assert guard.remaining_usd() == pytest.approx(1.0)
 
 
 async def test_client_blocks_live_call_before_sending_request(

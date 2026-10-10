@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from doubleblind_contract.runtime import free_port
+from doubleblind_sandbox.local import link_directory, unlink_directory
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEMO_DIR = REPO_ROOT / "demo"
@@ -22,24 +23,6 @@ SECRETS = {
     "DOUBLEBLIND_SECRET_PARTNER_API_KEY": "golden-partner-key",
     "DOUBLEBLIND_SECRET_WEBHOOK_SECRET": "golden-webhook-secret",
 }
-
-
-def link_directory(source: Path, link: Path) -> None:
-    if os.name == "nt":
-        import _winapi
-
-        _winapi.CreateJunction(str(source), str(link))
-    else:
-        link.symlink_to(source, target_is_directory=True)
-
-
-def unlink_directory(link: Path) -> None:
-    if not os.path.lexists(link):
-        return
-    if os.name == "nt":
-        os.rmdir(link)
-    else:
-        link.unlink()
 
 
 def side_env(side: str) -> dict[str, str]:

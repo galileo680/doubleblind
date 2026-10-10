@@ -213,18 +213,13 @@ def test_expect_state_waits_until_the_value_appears(http: httpx.Client) -> None:
 
 def test_template_and_binding_problems_are_failures_not_crashes(http: httpx.Client) -> None:
     missing_ctx = consumer_scenario("      - do: { party: consumer, action: pay_order }\n")
-    unknown_action = consumer_scenario("      - do: { party: consumer, action: refund }\n")
     broken_capture = consumer_scenario("      - do: { party: consumer, action: broken_capture }\n")
 
     with FakeShop() as shop:
-        results = [
-            run_consumer(contract, http, shop)
-            for contract in (missing_ctx, unknown_action, broken_capture)
-        ]
+        results = [run_consumer(contract, http, shop) for contract in (missing_ctx, broken_capture)]
 
     assert "'ctx' has no field 'order_id'" in messages(results[0])[0]
-    assert messages(results[1]) == ["action 'refund' is not defined in the consumer binding"]
-    assert messages(results[2]) == ["capture order_id: $.nothing not found in the response"]
+    assert messages(results[1]) == ["capture order_id: $.nothing not found in the response"]
     assert {result.status for result in results} == {"failed"}
 
 
@@ -327,12 +322,3 @@ def test_expect_emitted_without_a_matching_webhook(http: httpx.Client) -> None:
 
     assert (wrong.failures[0].path, wrong.failures[0].actual) == ("body.status", "CREATED")
     assert messages(empty) == ["no webhook was received"]
-
-
-def test_steps_that_need_missing_servers_fail_clearly(http: httpx.Client) -> None:
-    contract = consumer_scenario("      - expect_received: { operation: create_shipment }\n")
-    environment = RunEnvironment(contract=contract, side="consumer", http=http, secrets={}, env={})
-
-    result = ScenarioExecutor(environment, contract.scenarios[0]).run()
-
-    assert messages(result) == ["this step needs the provider stub"]

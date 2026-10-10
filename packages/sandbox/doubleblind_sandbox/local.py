@@ -4,7 +4,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 from collections.abc import Mapping
@@ -66,22 +65,24 @@ def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
 
 class LocalSandboxProvider:
     name = "local"
-    isolated = False
     python = f'"{sys.executable}"'
 
-    def __init__(self, root: Path | None = None, shared: Mapping[str, Path] | None = None) -> None:
-        self.root = root or Path(tempfile.mkdtemp(prefix="doubleblind-sandbox-"))
+    def __init__(self, root: Path, shared: Mapping[str, Path] | None = None) -> None:
+        self.root = root
         self.shared = {path.strip("/"): Path(source) for path, source in (shared or {}).items()}
         self.tags: dict[str, str] = {}
         self.services: dict[str, tuple[subprocess.Popen[bytes], Path]] = {}
 
+    def resolve(self, head: str) -> str:
+        if not head.startswith("tag:"):
+            return head
+        tagged = self.tags.get(head.removeprefix("tag:"))
+        if tagged is None:
+            raise SandboxError(f"no image with tag {head.removeprefix('tag:')}")
+        return tagged
+
     def version_dir(self, head: str) -> Path:
-        if head.startswith("tag:"):
-            tagged = self.tags.get(head.removeprefix("tag:"))
-            if tagged is None:
-                raise SandboxError(f"no image with tag {head.removeprefix('tag:')}")
-            head = tagged
-        return self.root / head.removeprefix(LOCAL_PREFIX)
+        return self.root / self.resolve(head).removeprefix(LOCAL_PREFIX)
 
     def local_path(self, version: Path, sandbox_path: str) -> Path:
         return version / sandbox_path.lstrip("/")
@@ -239,21 +240,19 @@ class LocalSandboxProvider:
         self.services[handle.id] = (process, version)
         return handle
 
-    def service_log(self, handle: ServiceHandle) -> str:
-        _, version = self.services[handle.id]
-        return (version / "service.log").read_text(encoding="utf-8", errors="replace")
-
-    async def stop_service(self, handle: ServiceHandle) -> float:
+    async def stop_service(self, handle: ServiceHandle) -> None:
         service = self.services.pop(handle.id, None)
         if service is None:
-            return 0.0
+            return
         process, version = service
         await asyncio.to_thread(stop_process_tree, process)
         await asyncio.to_thread(self.remove_version, version)
-        return 0.0
 
     async def write_files(self, workspace: Workspace, files: Mapping[str, bytes]) -> ExecResult:
-        return await self.run(workspace, "exit 0", persist=True, files=files, cwd="/")
+        result = await self.run(workspace, "exit 0", persist=True, files=files, cwd="/")
+        if not result.ok:
+            raise SandboxError(f"writing files failed: {result.output()[:300]}")
+        return result
 
     async def read_file(self, workspace: Workspace, path: str) -> bytes:
         target = self.local_path(self.version_dir(workspace.head), path)
@@ -265,11 +264,4 @@ class LocalSandboxProvider:
         return self.tags.get(tag)
 
     async def tag(self, workspace: Workspace, tag: str) -> None:
-        head = workspace.head
-        if head.startswith("tag:"):
-            existing = self.tags.get(head.removeprefix("tag:"))
-            if existing is None:
-                raise SandboxError(f"no image with tag {head.removeprefix('tag:')}")
-            head = existing
-        self.version_dir(head)
-        self.tags[tag] = head
+        self.tags[tag] = self.resolve(workspace.head)

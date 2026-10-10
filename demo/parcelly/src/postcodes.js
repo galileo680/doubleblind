@@ -1,4 +1,4 @@
-export const POSTCODE_PREFIX_TO_CITY = Object.freeze({
+const POSTCODE_PREFIX_TO_CITY = Object.freeze({
   "00": "Warszawa",
   "01": "Warszawa",
   "02": "Warszawa",

@@ -50,14 +50,13 @@ class DockerSandboxProvider:
     name = "docker"
     python = "python3"
 
-    def __init__(self, runner: Runner = run_command, docker: str = "docker") -> None:
+    def __init__(self, runner: Runner = run_command) -> None:
         self.runner = runner
-        self.docker = docker
 
     def docker_command(
         self, arguments: Sequence[str], timeout_s: float = 120
     ) -> subprocess.CompletedProcess[str]:
-        return self.runner([self.docker, *arguments], timeout_s)
+        return self.runner(["docker", *arguments], timeout_s)
 
     def checked(self, arguments: Sequence[str], timeout_s: float = 120) -> str:
         completed = self.docker_command(arguments, timeout_s)
@@ -74,6 +73,24 @@ class DockerSandboxProvider:
     async def aclose(self) -> None:
         return None
 
+    def create_container(
+        self,
+        workspace: Workspace,
+        command: Sequence[str],
+        cwd: str,
+        network: bool,
+        env: Mapping[str, str] | None,
+        options: Sequence[str] = (),
+    ) -> str:
+        container = f"doubleblind-{workspace.party}-{uuid.uuid4().hex[:12]}"
+        create = ["create", "--name", container, "--workdir", cwd, *options]
+        if not network:
+            create += ["--network", "none"]
+        for key, value in (env or {}).items():
+            create += ["--env", f"{key}={value}"]
+        self.checked([*create, self.image(workspace.head), *command])
+        return container
+
     def execute(
         self,
         workspace: Workspace,
@@ -86,14 +103,7 @@ class DockerSandboxProvider:
         env: Mapping[str, str] | None,
     ) -> ExecResult:
         started = time.monotonic()
-        container = f"doubleblind-{workspace.party}-{uuid.uuid4().hex[:12]}"
-        create = ["create", "--name", container, "--workdir", cwd]
-        if not network:
-            create += ["--network", "none"]
-        for key, value in (env or {}).items():
-            create += ["--env", f"{key}={value}"]
-        create += [self.image(workspace.head), "sh", "-c", command]
-        self.checked(create)
+        container = self.create_container(workspace, ["sh", "-c", command], cwd, network, env)
         try:
             if files:
                 self.copy_files(container, files)
@@ -152,14 +162,14 @@ class DockerSandboxProvider:
         env: Mapping[str, str] | None,
         files: Mapping[str, bytes] | None,
     ) -> ServiceHandle:
-        container = f"doubleblind-{workspace.party}-e2e-{uuid.uuid4().hex[:12]}"
-        create = ["create", "--name", container, "--workdir", REPO_DIR, "--add-host", HOST_ALIAS]
-        if not network:
-            create += ["--network", "none"]
-        for key, value in (env or {}).items():
-            create += ["--env", f"{key}={value}"]
-        create += [self.image(workspace.head), "timeout", str(timeout_s), "sh", "-c", command]
-        self.checked(create)
+        container = self.create_container(
+            workspace,
+            ["timeout", str(timeout_s), "sh", "-c", command],
+            REPO_DIR,
+            network,
+            env,
+            ["--add-host", HOST_ALIAS],
+        )
         if files:
             self.copy_files(container, files)
         self.checked(["start", container])
@@ -179,9 +189,8 @@ class DockerSandboxProvider:
             self.launch, workspace, command, network, timeout_s, env, files
         )
 
-    async def stop_service(self, handle: ServiceHandle) -> float:
+    async def stop_service(self, handle: ServiceHandle) -> None:
         await asyncio.to_thread(self.docker_command, ["rm", "--force", handle.id])
-        return 0.0
 
     async def write_files(self, workspace: Workspace, files: Mapping[str, bytes]) -> ExecResult:
         result = await self.run(workspace, "true", persist=True, files=files, cwd="/")

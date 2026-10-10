@@ -5,7 +5,12 @@ from typing import Any
 import httpx
 from contract_fixtures import MINIMAL
 
-from doubleblind_contract.http_server import BackgroundServer, IncomingRequest, OutgoingResponse
+from doubleblind_contract.http_server import (
+    BackgroundServer,
+    IncomingRequest,
+    OutgoingResponse,
+    header_value,
+)
 from doubleblind_contract.loader import load_binding_text, load_contract_text
 from doubleblind_contract.models import Binding, Contract
 from doubleblind_contract.signing import sign, verify
@@ -87,7 +92,9 @@ queries:
         return OutgoingResponse.json(200, order)
 
     def receive_webhook(self, request: IncomingRequest, body: dict[str, Any]) -> OutgoingResponse:
-        if not verify(SECRETS["webhook_secret"], request.body, request.header("X-Signature")):
+        if not verify(
+            SECRETS["webhook_secret"], request.body, header_value(request.headers, "X-Signature")
+        ):
             return OutgoingResponse.json(401, {"code": "INVALID_SIGNATURE"})
         for order in self.orders.values():
             if order.get("shipment_id") == body.get("shipment_id"):
@@ -134,7 +141,10 @@ actions:
             self.webhook_url = body["url"]
             return OutgoingResponse.json(201, {})
         if request.path == "/v1/shipments":
-            if request.header("Authorization") != f"Bearer {SECRETS['partner_api_key']}":
+            if (
+                header_value(request.headers, "Authorization")
+                != f"Bearer {SECRETS['partner_api_key']}"
+            ):
                 return OutgoingResponse.json(401, {"code": "UNAUTHORIZED"})
             shipment: dict[str, Any] = {"id": "shp_1", "reference": body.get("reference")}
             if self.complete_shipments:

@@ -1,7 +1,7 @@
 from broker_helpers import briefed, broker, converge, opening
 from scripted_party import BRIEFS, reference_contract, round_three, round_two
 
-from doubleblind_broker.contracts import load_yaml
+from doubleblind_contract.loader import parse_yaml
 
 REFERENCE = reference_contract()
 
@@ -19,7 +19,7 @@ def test_session_creation_returns_five_tokens() -> None:
         assert view["state"] == "CREATED"
         assert view["current_contract_version"] == 1
         assert [party["party"] for party in view["parties"]] == ["spokes", "parcelly"]
-        skeleton = load_yaml(session.get("/contract"))
+        skeleton = parse_yaml(session.get("/contract"))
         assert skeleton["id"] == "spokes-parcelly-shipping"
         assert skeleton["parties"]["provider"]["name"] == "Parcelly (courier)"
 
@@ -121,7 +121,7 @@ def test_accepted_turn_creates_a_version_and_passes_the_turn() -> None:
         briefed(session)
         result = opening(session).json()
         view = session.get("")
-        contract = load_yaml(session.get("/contract"))
+        contract = parse_yaml(session.get("/contract"))
         diff = session.get("/contract/diff", **{"from": 1, "to": 2})
         turns = session.get("/turns")
 
@@ -179,7 +179,7 @@ def test_questions_become_decisions_after_an_answer() -> None:
     with broker() as session:
         briefed(session)
         opening(session)
-        current = load_yaml(session.get("/contract"))
+        current = parse_yaml(session.get("/contract"))
         result = session.turn(
             "agent_spokes",
             round_two(current, REFERENCE),
@@ -188,14 +188,17 @@ def test_questions_become_decisions_after_an_answer() -> None:
             ],
         ).json()
         hidden = session.get("/questions", "agent_parcelly")
-        wrong_human = session.post("/questions/Q1/answer", "human_parcelly", {"answer": "nie"})
-        answered = session.client.post(
-            "/api/v1/questions/Q1/answer",
-            headers=session.headers("human_spokes"),
-            json={"answer": "tak"},
-        )
-        again = session.post("/questions/Q1/answer", "human_spokes", {"answer": "tak"})
-        contract = load_yaml(session.get("/contract"))
+        wrong_human, answered, again = [
+            session.client.post(
+                "/api/v1/questions/Q1/answer", headers=session.headers(who), json={"answer": text}
+            )
+            for who, text in [
+                ("human_parcelly", "nie"),
+                ("human_spokes", "tak"),
+                ("human_spokes", "tak"),
+            ]
+        ]
+        contract = parse_yaml(session.get("/contract"))
         questions = session.get("/questions", "human_spokes")
 
     assert result["questions"] == ["Q1"]
@@ -219,7 +222,7 @@ def test_autopilot_answers_from_the_preset() -> None:
         opening(session)
         session.turn(
             "agent_spokes",
-            round_two(load_yaml(session.get("/contract")), REFERENCE),
+            round_two(parse_yaml(session.get("/contract")), REFERENCE),
             questions=[{"text": "Co z adresami nieparsowalnymi?", "options": ["a", "b"]}],
         )
         session.client.portal.call(session.service.wait_for_background)
@@ -234,7 +237,7 @@ def test_both_sides_ready_on_the_same_version_converge() -> None:
         opening(session)
         session.turn(
             "agent_spokes",
-            round_two(load_yaml(session.get("/contract")), REFERENCE),
+            round_two(parse_yaml(session.get("/contract")), REFERENCE),
             status="ready_to_sign",
         )
         assert session.state() == "NEGOTIATING"
@@ -250,7 +253,7 @@ def test_ready_with_new_patches_does_not_converge() -> None:
         session.turn("agent_spokes", status="ready_to_sign")
         session.turn(
             "agent_parcelly",
-            round_three(load_yaml(session.get("/contract")), REFERENCE),
+            round_three(parse_yaml(session.get("/contract")), REFERENCE),
             status="ready_to_sign",
         )
 
@@ -292,7 +295,7 @@ def test_signatures_on_the_current_version_start_implementation() -> None:
         session.post("/signatures", "human_spokes", {"version": 3}, 201)
         assert session.state() == "AWAITING_SIGNATURES"
         session.post("/signatures", "human_parcelly", {"version": 3}, 201)
-        contract = load_yaml(session.get("/contract"))
+        contract = parse_yaml(session.get("/contract"))
         action = session.get("/next-action", "agent_spokes")
 
     assert stale.status_code == 409

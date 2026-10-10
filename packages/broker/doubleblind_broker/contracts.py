@@ -7,8 +7,6 @@ import jsonpatch
 from ruamel.yaml import YAML
 
 from doubleblind_broker.presets import Preset
-from doubleblind_contract.loader import parse_yaml
-from doubleblind_contract.validate import ValidationReport, validate_contract_data
 
 PROTECTED_PATHS = ("/doubleblind", "/id", "/version", "/status", "/parties")
 
@@ -43,10 +41,6 @@ def dump_yaml(data: dict[str, Any]) -> str:
     return stream.getvalue()
 
 
-def load_yaml(text: str) -> dict[str, Any]:
-    return parse_yaml(text)
-
-
 def touches_protected_path(path: str) -> bool:
     return any(
         path == protected or path.startswith(f"{protected}/") for protected in PROTECTED_PATHS
@@ -75,10 +69,6 @@ def with_version(contract: dict[str, Any], version: int, status: str) -> dict[st
     updated["version"] = version
     updated["status"] = status
     return updated
-
-
-def validate(contract: dict[str, Any]) -> ValidationReport:
-    return validate_contract_data(contract)
 
 
 def human_decision_id(contract: dict[str, Any], question_id: str) -> str:
@@ -128,14 +118,3 @@ def diff_stats(old: str, new: str) -> dict[str, int]:
 
 def patch_summary(patches: list[dict[str, Any]]) -> list[str]:
     return [f"{patch.get('op')} {patch.get('path')}" for patch in patches]
-
-
-def normalized(contract: dict[str, Any]) -> dict[str, Any]:
-    data = copy.deepcopy(contract)
-    for key in ("decisions", "scenarios"):
-        items = data.get(key, [])
-        for item in items:
-            if isinstance(item, dict):
-                item.pop("origin_question", None)
-        data[key] = sorted(items, key=lambda item: str(item.get("id", "")))
-    return data

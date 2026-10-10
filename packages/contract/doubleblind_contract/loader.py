@@ -33,22 +33,6 @@ class ContractLoadError(Exception):
         super().__init__("\n".join(problem.render() for problem in self.problems))
 
 
-class InvalidYamlError(ContractLoadError):
-    pass
-
-
-class UnresolvedRefError(ContractLoadError):
-    pass
-
-
-class MissingEnvironmentError(ContractLoadError):
-    pass
-
-
-class InvalidStructureError(ContractLoadError):
-    pass
-
-
 def format_path(parts: Sequence[str | int]) -> str:
     rendered = ""
     for part in parts:
@@ -79,9 +63,9 @@ def parse_yaml(text: str) -> dict[str, Any]:
     try:
         data = YAML(typ="safe").load(text)
     except YAMLError as error:
-        raise InvalidYamlError([yaml_problem(error)]) from error
+        raise ContractLoadError([yaml_problem(error)]) from error
     if not isinstance(data, Mapping):
-        raise InvalidYamlError([Problem("", "a contract must be a YAML mapping at the top level")])
+        raise ContractLoadError([Problem("", "a contract must be a YAML mapping at the top level")])
     converted: dict[str, Any] = to_json_compatible(data)
     return converted
 
@@ -165,7 +149,7 @@ def resolve_refs(data: Mapping[str, Any]) -> dict[str, Any]:
     resolver = RefResolver(schemas if isinstance(schemas, Mapping) else {})
     resolved = resolver.resolve_document(data)
     if resolver.problems:
-        raise UnresolvedRefError(resolver.problems)
+        raise ContractLoadError(resolver.problems)
     return resolved
 
 
@@ -194,7 +178,7 @@ def interpolate_env(data: Mapping[str, Any], env: Mapping[str, str]) -> dict[str
 
     interpolated: dict[str, Any] = map_strings(data, (), substitute)
     if problems:
-        raise MissingEnvironmentError(problems)
+        raise ContractLoadError(problems)
     return interpolated
 
 
@@ -215,14 +199,14 @@ def build_contract(data: Mapping[str, Any]) -> Contract:
     try:
         return Contract.model_validate(data)
     except ValidationError as error:
-        raise InvalidStructureError(structure_problems(error)) from error
+        raise ContractLoadError(structure_problems(error)) from error
 
 
 def build_binding(data: Mapping[str, Any]) -> Binding:
     try:
         return Binding.model_validate(data)
     except ValidationError as error:
-        raise InvalidStructureError(structure_problems(error)) from error
+        raise ContractLoadError(structure_problems(error)) from error
 
 
 def load_contract_text(text: str, env: Mapping[str, str] | None = None) -> Contract:

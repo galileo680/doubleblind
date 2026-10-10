@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from llm_helpers import ClientFactory, FakeTokenFactory, Reply, completion_body, error_body
+from llm_helpers import ClientFactory, FakeTokenFactory, Reply, completion_body
 from typer.testing import CliRunner
 
 from doubleblind_llm import cli
@@ -21,8 +21,6 @@ def token_factory_behaviour(body: dict[str, Any]) -> Reply:
         return 200, completion_body('{"answer": "ok"}')
     if body.get("chat_template_kwargs", {}).get("enable_thinking") is False:
         return 200, completion_body("pong")
-    if "reasoning_budget" in body:
-        return 400, error_body("unknown field")
     return 200, completion_body("pong", reasoning_content="hmm")
 
 
@@ -37,16 +35,14 @@ async def test_doctor_detects_capabilities(
     make_client: ClientFactory, fake_service: FakeTokenFactory
 ) -> None:
     client = make_client()
-    report = await Doctor(client).run(["nano", "super"])
+    report = await Doctor(client).run()
     nano = report.models["nano"]
     assert nano.available
     assert nano.thinking.toggle == "chat_template_kwargs"
-    assert nano.thinking.reasoning_fields == ["reasoning_content"]
-    assert nano.thinking.reasoning_budget_param is False
     assert nano.native_tools
     assert nano.json_schema
     assert nano.latency_ms is not None
-    assert nano.errors == ["reasoning_budget: rejected (400)"]
+    assert nano.errors == []
     assert report.models["super"].available is False
     assert client.ledger is not None
     assert {entry.role for entry in client.ledger.entries()} == {"doctor"}
@@ -59,15 +55,16 @@ def test_doctor_command_writes_report(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = make_client()
+    client.settings = client.settings.model_copy(update={"config_dir": tmp_path})
+    fake_service.model_ids = [model.id for model in client.settings.models.values()]
 
     def fake_from_env(**_: object) -> LLMClient:
         return client
 
     monkeypatch.setattr(cli.LLMClient, "from_env", staticmethod(fake_from_env))
-    target = tmp_path / "capabilities.json"
-    result = CliRunner().invoke(cli.app, ["doctor", "--model", "nano", "--output", str(target)])
+    result = CliRunner().invoke(cli.app, ["doctor"])
     assert result.exit_code == 0, result.output
-    report = load_capabilities(target)
+    report = load_capabilities(tmp_path / "capabilities.json")
     assert report is not None
-    assert list(report.models) == ["nano"]
+    assert list(report.models) == list(client.settings.models)
     assert "Doctor spent $" in result.output

@@ -3,7 +3,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,34 +42,11 @@ def venv_python() -> Path:
     return VENV / "bin" / "python"
 
 
-def candidate_base_pythons() -> Iterator[list[str]]:
-    if sys.version_info >= MIN_PYTHON:
-        yield [sys.executable]
-    launcher = shutil.which("py")
-    if launcher:
-        for version in ("3.13", "3.12"):
-            yield [launcher, f"-{version}"]
-    for name in ("python3.13", "python3.12", "python3"):
-        found = shutil.which(name)
-        if found:
-            yield [found]
-
-
-def find_base_python() -> list[str]:
-    check = f"import sys; print(sys.version_info >= {MIN_PYTHON})"
-    for candidate in candidate_base_pythons():
-        probe = subprocess.run(
-            [*candidate, "-c", check], capture_output=True, text=True, check=False
-        )
-        if probe.returncode == 0 and probe.stdout.strip() == "True":
-            return candidate
-    required = ".".join(str(part) for part in MIN_PYTHON)
-    raise SystemExit(f"Python {required}+ is required to create the virtual environment.")
-
-
 def ensure_venv() -> Path:
     if not venv_python().exists():
-        run([*find_base_python(), "-m", "venv", VENV])
+        if sys.version_info < MIN_PYTHON:
+            raise SystemExit("Python 3.12+ is required to create the virtual environment.")
+        run([sys.executable, "-m", "venv", VENV])
     return venv_python()
 
 

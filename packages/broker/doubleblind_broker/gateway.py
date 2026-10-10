@@ -142,15 +142,10 @@ class GatewayError(Exception):
 
 
 class IntegrationGateway:
-    def __init__(
-        self,
-        allowlists: AllowlistSource,
-        on_event: EventSink,
-        timeout_s: float = DEFAULT_TIMEOUT_S,
-    ) -> None:
+    def __init__(self, allowlists: AllowlistSource, on_event: EventSink) -> None:
         self.allowlists = allowlists
         self.on_event = on_event
-        self.timeout_s = timeout_s
+        self.timeout_s = DEFAULT_TIMEOUT_S
         self.tokens: dict[tuple[str, str], str] = {}
         self.channels: dict[tuple[str, str], Channel] = {}
 

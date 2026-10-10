@@ -7,19 +7,14 @@ import tempfile
 from pathlib import Path
 
 from doubleblind_llm.settings import load_dotenv
-from doubleblind_sandbox.costs import LedgerCosts
-from doubleblind_sandbox.docker import DockerSandboxProvider, docker_available
+from doubleblind_sandbox.docker import docker_available
+from doubleblind_sandbox.environment import BASE_IMAGES_FILES, remote_sandbox
 from doubleblind_sandbox.images import BaseImage, BasePlan, directory_hash, ensure_base_image
 from doubleblind_sandbox.provider import SandboxError, SandboxProvider
-from doubleblind_sandbox.tokenfactory import TokenFactorySandboxProvider
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RECIPES = REPO_ROOT / "sandboxes" / "tokenfactory"
 CONTRACT_PACKAGE = REPO_ROOT / "packages" / "contract"
-BASE_IMAGES_FILES = {
-    "tokenfactory": REPO_ROOT / "volumes" / "base-images.json",
-    "docker": REPO_ROOT / "volumes" / "base-images.docker.json",
-}
 
 
 def party_plans(demo_dir: Path) -> list[BasePlan]:
@@ -62,12 +57,11 @@ def load_base_images(path: Path) -> dict[str, str]:
 
 
 def build_provider(kind: str) -> SandboxProvider:
-    if kind == "docker":
-        if not docker_available():
-            raise SandboxError("the Docker daemon is not running")
-        return DockerSandboxProvider()
-    load_dotenv(REPO_ROOT / ".env")
-    return TokenFactorySandboxProvider.from_env(LedgerCosts.from_env(REPO_ROOT))
+    if kind == "docker" and not docker_available():
+        raise SandboxError("the Docker daemon is not running")
+    if kind == "tokenfactory":
+        load_dotenv(REPO_ROOT / ".env")
+    return remote_sandbox(kind)()
 
 
 async def build(

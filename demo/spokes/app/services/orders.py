@@ -12,13 +12,11 @@ PAYABLE_STATUSES = frozenset({OrderStatus.PENDING, OrderStatus.PAID})
 class OrderNotFoundError(LookupError):
     def __init__(self, order_id: str) -> None:
         super().__init__(f"Order {order_id} not found")
-        self.order_id = order_id
 
 
 class OrderNotPayableError(ValueError):
     def __init__(self, order: Order) -> None:
         super().__init__(f"Order {order.id} cannot be paid in status '{order.status}'")
-        self.order_id = order.id
 
 
 def next_order_number(session: Session) -> int:

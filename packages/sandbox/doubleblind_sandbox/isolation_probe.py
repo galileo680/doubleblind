@@ -145,27 +145,19 @@ async def probe_models(api_key: str | None) -> ProbeResult:
 
 
 class SandboxIsolationProbe:
-    def __init__(
-        self,
-        factory: ProbeFactory,
-        bases: Mapping[str, str],
-        consumer: str = "spokes",
-        provider: str = "parcelly",
-    ) -> None:
+    def __init__(self, factory: ProbeFactory, bases: Mapping[str, str]) -> None:
         self.factory = factory
         self.bases = dict(bases)
-        self.consumer = consumer
-        self.provider = provider
 
     async def run(self) -> list[ProbeResult]:
         sandbox = self.factory()
         try:
-            consumer = await sandbox.open_workspace(self.consumer, self.bases[self.consumer])
-            provider = await sandbox.open_workspace(self.provider, self.bases[self.provider])
+            consumer = await sandbox.open_workspace("spokes", self.bases["spokes"])
+            provider = await sandbox.open_workspace("parcelly", self.bases["parcelly"])
             probes: list[Callable[[], Awaitable[ProbeResult]]] = [
                 lambda: probe_dns(sandbox, consumer),
                 lambda: probe_listing(sandbox, consumer),
-                lambda: probe_credentials(self.bases[self.provider].removeprefix("tag:")),
+                lambda: probe_credentials(self.bases["parcelly"].removeprefix("tag:")),
                 lambda: probe_no_route(sandbox, consumer, provider),
                 lambda: probe_models(os.environ.get("NEBIUS_API_KEY")),
             ]

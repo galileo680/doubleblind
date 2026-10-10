@@ -8,7 +8,6 @@ from sqlalchemy.pool import StaticPool
 
 DATABASE_URL_ENV = "SPOKES_DATABASE_URL"
 DEFAULT_DATABASE_URL = "sqlite:///./spokes.db"
-IN_MEMORY_URLS = frozenset({"sqlite://", "sqlite:///:memory:"})
 
 
 class Base(DeclarativeBase):
@@ -17,7 +16,7 @@ class Base(DeclarativeBase):
 
 def build_engine(url: str) -> Engine:
     connect_args = {"check_same_thread": False}
-    if url in IN_MEMORY_URLS:
+    if url == "sqlite://":
         return create_engine(url, connect_args=connect_args, poolclass=StaticPool)
     return create_engine(url, connect_args=connect_args)
 

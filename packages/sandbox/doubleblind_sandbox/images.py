@@ -8,7 +8,7 @@ from doubleblind_sandbox.provider import REPO_DIR, SandboxError, SandboxProvider
 TOOLS_DIR = "/opt/doubleblind"
 RECIPE_PATH = f"{TOOLS_DIR}/recipe.sh"
 WHEELS_DIR = f"{TOOLS_DIR}/wheels"
-DEFAULT_BASE_IMAGE = "tag:python:3.13-slim"
+BASE_IMAGE = "tag:python:3.13-slim"
 BUILD_TIMEOUT_S = 1500
 SKIPPED_PARTS = frozenset(
     {"node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git"}
@@ -23,7 +23,6 @@ class BasePlan:
     repo_dir: Path
     recipe: Path
     tools: Mapping[str, Path] = field(default_factory=dict)
-    base_image: str = DEFAULT_BASE_IMAGE
 
 
 @dataclass(frozen=True)
@@ -32,7 +31,6 @@ class BaseImage:
     tag: str
     built: bool
     cost_usd: float = 0.0
-    log_tail: str = ""
 
 
 def iter_repo_files(repo_dir: Path) -> Iterable[Path]:
@@ -45,9 +43,9 @@ def iter_repo_files(repo_dir: Path) -> Iterable[Path]:
         yield path
 
 
-def repo_files(repo_dir: Path, target: str = REPO_DIR) -> dict[str, bytes]:
+def repo_files(repo_dir: Path) -> dict[str, bytes]:
     return {
-        f"{target}/{path.relative_to(repo_dir).as_posix()}": path.read_bytes()
+        f"{REPO_DIR}/{path.relative_to(repo_dir).as_posix()}": path.read_bytes()
         for path in iter_repo_files(repo_dir)
     }
 
@@ -62,11 +60,10 @@ def content_hash(files: Mapping[str, bytes], extra: Iterable[str] = ()) -> str:
     return digest.hexdigest()
 
 
-def directory_hash(directory: Path, pattern: str = "*") -> str:
+def directory_hash(directory: Path) -> str:
     files = {
         path.relative_to(directory).as_posix(): path.read_bytes()
         for path in iter_repo_files(directory)
-        if path.match(pattern)
     }
     return content_hash(files)
 
@@ -94,10 +91,10 @@ async def ensure_base_image(
 ) -> BaseImage:
     files = build_files(plan, wheels)
     hashed = {path: content for path, content in files.items() if not path.startswith(WHEELS_DIR)}
-    tag = base_tag(plan.party, content_hash(hashed, [wheels_digest, plan.base_image]))
+    tag = base_tag(plan.party, content_hash(hashed, [wheels_digest, BASE_IMAGE]))
     if not force and await provider.find_tag(tag) is not None:
         return BaseImage(plan.party, tag, built=False)
-    workspace = await provider.open_workspace(plan.party, plan.base_image)
+    workspace = await provider.open_workspace(plan.party, BASE_IMAGE)
     result = await provider.run(
         workspace,
         f"sh {RECIPE_PATH}",
@@ -107,8 +104,9 @@ async def ensure_base_image(
         files=files,
         cwd="/",
     )
-    tail = result.output()[-2000:]
     if not result.ok:
-        raise SandboxError(f"building the {plan.party} base image failed:\n{tail}")
+        raise SandboxError(
+            f"building the {plan.party} base image failed:\n{result.output()[-2000:]}"
+        )
     await provider.tag(workspace, tag)
-    return BaseImage(plan.party, tag, built=True, cost_usd=result.cost_usd, log_tail=tail)
+    return BaseImage(plan.party, tag, built=True, cost_usd=result.cost_usd)

@@ -47,12 +47,11 @@ class TokenFactorySandboxProvider:
         api_key: str,
         project_id: str,
         costs: LedgerCosts | None = None,
-        base_url: str = BASE_URL,
         transport: httpx.AsyncBaseTransport | None = None,
         sleep: Any = asyncio.sleep,
     ) -> None:
         self.client = httpx.AsyncClient(
-            base_url=base_url,
+            base_url=BASE_URL,
             headers={"Authorization": f"Bearer {api_key}", "Project": project_id},
             timeout=60.0,
             transport=transport,
@@ -62,13 +61,9 @@ class TokenFactorySandboxProvider:
         self.sleep = sleep
 
     @classmethod
-    def from_env(
-        cls, costs: LedgerCosts | None = None, prefix: str = ""
-    ) -> "TokenFactorySandboxProvider":
-        api_key = os.environ.get(f"{prefix}SANDBOX_API_KEY") or os.environ.get("NEBIUS_API_KEY")
-        project = os.environ.get(f"{prefix}SANDBOX_PROJECT_ID") or os.environ.get(
-            "NEBIUS_PROJECT_ID"
-        )
+    def from_env(cls, costs: LedgerCosts | None = None) -> "TokenFactorySandboxProvider":
+        api_key = os.environ.get("SANDBOX_API_KEY") or os.environ.get("NEBIUS_API_KEY")
+        project = os.environ.get("SANDBOX_PROJECT_ID") or os.environ.get("NEBIUS_PROJECT_ID")
         if not api_key or not project:
             raise SandboxError(
                 "set NEBIUS_API_KEY and NEBIUS_PROJECT_ID to use Token Factory Sandboxes"
@@ -242,23 +237,6 @@ class TokenFactorySandboxProvider:
         uuid = await self.resolve(workspace.head)
         await self.request("PATCH", f"/v1/images/{uuid}/tag", json={"tag": tag})
 
-    async def import_image(self, url: str, tag: str, timeout_s: int = 600) -> str:
-        existing = await self.find_tag(tag)
-        if existing is not None:
-            return existing
-        response = await self.request(
-            "POST",
-            "/v1/images/import",
-            json={"registry": {"url": url}, "tag": tag, "timeout": timeout_s},
-        )
-        data = await self.wait(str(response.json()["uuid"]), timeout_s + 60)
-        if data.get("status") != "SUCCESS":
-            raise SandboxError(f"importing {url} failed: {data.get('error')}")
-        found = await self.find_tag(tag)
-        if found is None:
-            raise SandboxError(f"imported {url} but tag {tag} is missing")
-        return found
-
     async def start_service(
         self,
         workspace: Workspace,
@@ -303,10 +281,8 @@ class TokenFactorySandboxProvider:
                     data = event.get("data")
                     yield data if isinstance(data, str) else json.dumps(data)
 
-    async def stop_service(self, handle: ServiceHandle) -> float:
+    async def stop_service(self, handle: ServiceHandle) -> None:
         await self.client.delete(f"/v1/operations/{handle.id}")
         data = await self.wait(handle.id, 60)
-        cost = self.to_result(data, 0.0).cost_usd
         if self.costs is not None:
-            self.costs.record(handle.party, cost, "service")
-        return cost
+            self.costs.record(handle.party, self.to_result(data, 0.0).cost_usd, "service")

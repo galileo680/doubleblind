@@ -10,7 +10,7 @@ from llm_helpers import (
     error_body,
 )
 
-from doubleblind_llm.domain import LLMCallEvent, LLMRequest, Role, ToolMode
+from doubleblind_llm.domain import LLMCallEvent, LLMRequest, Role
 from doubleblind_llm.errors import MissingApiKeyError, ReplayMissError, StructuredOutputError
 from doubleblind_llm.settings import LLMSettings
 
@@ -104,15 +104,8 @@ async def test_native_tool_calls_are_parsed(
     body = api.chat_bodies[-1]
     assert body["tools"] == [ECHO_TOOL]
     assert body["tool_choice"] == "auto"
-    assert response.tool_mode == ToolMode.NATIVE
     call = response.tool_calls[0]
     assert (call.id, call.name, call.arguments) == ("call_1", "echo", {"text": "hi"})
-    assert response.assistant_message()["tool_calls"][0]["function"]["name"] == "echo"
-    assert response.tool_result_message(call, "hi") == {
-        "role": "tool",
-        "tool_call_id": "call_1",
-        "content": "hi",
-    }
 
 
 async def test_json_fallback_tool_calls_are_parsed_from_content(
@@ -126,10 +119,8 @@ async def test_json_fallback_tool_calls_are_parsed_from_content(
     body = api.chat_bodies[-1]
     assert "tools" not in body
     assert "Available tools" in body["messages"][0]["content"]
-    assert response.tool_mode == ToolMode.JSON_FALLBACK
     call = response.tool_calls[0]
     assert (call.name, call.arguments) == ("echo", {"text": "hi"})
-    assert response.tool_result_message(call, {"ok": True})["role"] == "user"
 
 
 async def test_structured_output_uses_json_schema(

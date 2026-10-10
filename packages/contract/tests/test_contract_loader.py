@@ -6,11 +6,7 @@ from contract_fixtures import FIXTURES_DIR, MINIMAL, SCHEMA_BROKEN, SIGNED
 
 from doubleblind_contract.loader import (
     ContractLoadError,
-    InvalidStructureError,
-    InvalidYamlError,
-    MissingEnvironmentError,
     Problem,
-    UnresolvedRefError,
     interpolate_env,
     load_contract,
     load_contract_text,
@@ -90,7 +86,7 @@ def test_resolving_refs_does_not_change_the_input() -> None:
 
 
 def test_reports_a_ref_to_a_missing_schema_with_its_location() -> None:
-    with pytest.raises(UnresolvedRefError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract(FIXTURES_DIR / "broken_rule1_unresolved_ref.yaml")
 
     assert caught.value.problems == [
@@ -105,7 +101,7 @@ def test_reports_a_ref_to_a_missing_schema_with_its_location() -> None:
 def test_reports_unsupported_ref_formats(reference: str) -> None:
     text = minimal_text('"#/schemas/Shipment"', f'"{reference}"')
 
-    with pytest.raises(UnresolvedRefError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract_text(text)
 
     assert "only '#/schemas/<Name>' is allowed" in caught.value.problems[0].message
@@ -114,7 +110,7 @@ def test_reports_unsupported_ref_formats(reference: str) -> None:
 def test_reports_a_ref_that_is_not_text() -> None:
     text = minimal_text('{ $ref: "#/schemas/Shipment" }', "{ $ref: 5 }")
 
-    with pytest.raises(UnresolvedRefError, match="must be text"):
+    with pytest.raises(ContractLoadError, match="must be text"):
         load_contract_text(text)
 
 
@@ -132,7 +128,7 @@ def test_reports_a_circular_ref_once() -> None:
         "  StatusChanged:\n",
     )
 
-    with pytest.raises(UnresolvedRefError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract_text(text)
 
     assert len(caught.value.problems) == 1
@@ -179,7 +175,7 @@ def test_substitutes_a_variable_inside_longer_text() -> None:
 
 
 def test_reports_every_missing_environment_variable() -> None:
-    with pytest.raises(MissingEnvironmentError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract(MINIMAL, env={})
 
     assert caught.value.problems == [
@@ -209,7 +205,7 @@ def test_interpolation_leaves_runtime_templates_untouched() -> None:
 
 
 def test_reports_yaml_syntax_errors_with_the_line() -> None:
-    with pytest.raises(InvalidYamlError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract_text('doubleblind: "1.0"\nid: [unclosed\n')
 
     assert caught.value.problems[0].path.startswith("line ")
@@ -218,13 +214,13 @@ def test_reports_yaml_syntax_errors_with_the_line() -> None:
 def test_reports_duplicate_keys() -> None:
     text = minimal_text("version: 1\n", "version: 1\nversion: 2\n")
 
-    with pytest.raises(InvalidYamlError, match='duplicate key "version"'):
+    with pytest.raises(ContractLoadError, match='duplicate key "version"'):
         load_contract_text(text)
 
 
 @pytest.mark.parametrize("text", ["- just\n- a list\n", "", "just text\n"])
 def test_rejects_a_document_that_is_not_a_mapping(text: str) -> None:
-    with pytest.raises(InvalidYamlError, match="YAML mapping"):
+    with pytest.raises(ContractLoadError, match="YAML mapping"):
         load_contract_text(text)
 
 
@@ -253,7 +249,7 @@ def test_accepts_status_codes_written_without_quotes() -> None:
 
 
 def test_reports_structure_errors_with_their_location() -> None:
-    with pytest.raises(InvalidStructureError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract(SCHEMA_BROKEN)
 
     assert [problem.path for problem in caught.value.problems] == ["version"]
@@ -265,7 +261,7 @@ def test_structure_error_paths_for_steps_are_readable() -> None:
         "- do: { party: consumer, action: pay_order, timeout: 5 }",
     )
 
-    with pytest.raises(InvalidStructureError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_contract_text(text)
 
     assert [problem.path for problem in caught.value.problems] == [

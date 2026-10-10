@@ -1,15 +1,19 @@
 import json
 import re
 import threading
-import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import httpx
 from jsonschema import Draft202012Validator
 
-from doubleblind_contract.http_server import BackgroundServer, IncomingRequest, OutgoingResponse
+from doubleblind_contract.http_server import (
+    BackgroundServer,
+    IncomingRequest,
+    OutgoingResponse,
+    header_value,
+)
 from doubleblind_contract.loader import format_path
 from doubleblind_contract.models import Contract, EmitSignature, HeaderRule, Operation
 from doubleblind_contract.runtime import ConfigurationError
@@ -27,31 +31,9 @@ class ReceivedRequest:
     path: str
     headers: dict[str, str]
     body: Any
-    raw_body: str
     status: int
     replayed: bool = False
     violations: list[str] = field(default_factory=list)
-    received_at: float = field(default_factory=time.time)
-
-    def as_match_target(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "path": self.path,
-            "headers": self.headers,
-            "body": self.body,
-        }
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "operation": self.operation,
-            "method": self.method,
-            "path": self.path,
-            "headers": self.headers,
-            "body": self.body,
-            "status": self.status,
-            "replayed": self.replayed,
-            "violations": self.violations,
-        }
 
 
 def path_pattern(template: str) -> re.Pattern[str]:
@@ -60,14 +42,6 @@ def path_pattern(template: str) -> re.Pattern[str]:
         f"(?P<{part[1:-1]}>[^/]+)" if part.startswith("{") else re.escape(part) for part in parts
     )
     return re.compile(f"^{regex}$")
-
-
-def header_value(headers: Mapping[str, str], name: str) -> str | None:
-    lowered = name.lower()
-    for key, value in headers.items():
-        if key.lower() == lowered:
-            return value
-    return None
 
 
 def header_violations(rules: Mapping[str, HeaderRule], headers: Mapping[str, str]) -> list[str]:
@@ -153,68 +127,54 @@ class ProviderStub:
         route = self.find_route(request.method, request.path)
         if route is None:
             message = f"no operation in the contract matches {request.method} {request.path}"
-            self.record(None, request, None, raw_body, 404, [message])
+            self.record(None, request, None, 404, [message])
             return OutgoingResponse.json(404, {"code": "NO_SUCH_OPERATION", "message": message})
         operation_id, operation = route
         try:
             body = json.loads(raw_body) if raw_body.strip() else None
         except ValueError:
             message = "request body is not valid JSON"
-            self.record(operation_id, request, raw_body, raw_body, 422, [message])
+            self.record(operation_id, request, raw_body, 422, [message])
             return OutgoingResponse.json(422, {"code": "CONTRACT_VIOLATION", "message": message})
         violations = header_violations(operation.request.headers, request.headers)
         violations += body_violations(operation.request.body, body)
         if violations:
-            self.record(operation_id, request, body, raw_body, 422, violations)
+            self.record(operation_id, request, body, 422, violations)
             return OutgoingResponse.json(
                 422, {"code": "CONTRACT_VIOLATION", "message": violations[0]}
             )
-        return self.respond(operation_id, operation, request, body, raw_body)
+        return self.respond(operation_id, operation, request, body)
 
     def respond(
-        self,
-        operation_id: str,
-        operation: Operation,
-        request: IncomingRequest,
-        body: Any,
-        raw_body: str,
+        self, operation_id: str, operation: Operation, request: IncomingRequest, body: Any
     ) -> OutgoingResponse:
         stub = operation.stub
         if stub is None:
             message = f"operation {operation_id} has no stub in the contract"
-            self.record(operation_id, request, body, raw_body, 501, [message])
+            self.record(operation_id, request, body, 501, [message])
             return OutgoingResponse.json(501, {"code": "NO_STUB", "message": message})
         key_header = stub.idempotent_on_header
         key = header_value(request.headers, key_header) if key_header else None
         with self.lock:
-            if key is not None and (operation_id, key) in self.remembered:
-                status, payload = self.remembered[(operation_id, key)]
-                self.entries.append(
-                    ReceivedRequest(
-                        operation_id,
-                        request.method,
-                        request.path,
-                        dict(request.headers),
-                        body,
-                        raw_body,
-                        status,
-                        replayed=True,
-                    )
-                )
-                return OutgoingResponse.json(status, payload)
+            replay = self.remembered.get((operation_id, key)) if key is not None else None
             sequence = self.sequences.get(operation_id, 0) + 1
-            self.sequences[operation_id] = sequence
+            if replay is None:
+                self.sequences[operation_id] = sequence
+        if replay is not None:
+            status, payload = replay
+            self.record(operation_id, request, body, status, [], replayed=True)
+            return OutgoingResponse.json(status, payload)
         variables = {"seq": sequence, "request": {"body": body, "headers": dict(request.headers)}}
         try:
             payload = render(stub.body, variables)
         except TemplateError as error:
             message = f"stub body template failed: {error}"
-            self.record(operation_id, request, body, raw_body, 500, [message])
+            self.record(operation_id, request, body, 500, [message])
             return OutgoingResponse.json(500, {"code": "STUB_TEMPLATE_ERROR", "message": message})
         with self.lock:
             if key is not None:
                 self.remembered[(operation_id, key)] = (stub.default_status, payload)
-        self.record(operation_id, request, body, raw_body, stub.default_status, [])
+        self.record(operation_id, request, body, stub.default_status, [])
         return OutgoingResponse.json(stub.default_status, payload)
 
     def record(
@@ -222,9 +182,9 @@ class ProviderStub:
         operation_id: str | None,
         request: IncomingRequest,
         body: Any,
-        raw_body: str,
         status: int,
         violations: list[str],
+        replayed: bool = False,
     ) -> None:
         entry = ReceivedRequest(
             operation_id,
@@ -232,9 +192,9 @@ class ProviderStub:
             request.path,
             dict(request.headers),
             body,
-            raw_body,
             status,
-            violations=violations,
+            replayed,
+            violations,
         )
         with self.lock:
             self.entries.append(entry)
@@ -242,7 +202,7 @@ class ProviderStub:
     def handle_control(self, request: IncomingRequest) -> OutgoingResponse:
         action = request.path.removeprefix(CONTROL_PREFIX)
         if request.method == "GET" and action == "log":
-            return OutgoingResponse.json(200, [entry.to_dict() for entry in self.log()])
+            return OutgoingResponse.json(200, [asdict(entry) for entry in self.log()])
         if request.method == "POST" and action == "reset":
             self.reset()
             return OutgoingResponse.json(200, {"status": "reset"})

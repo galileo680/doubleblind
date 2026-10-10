@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from doubleblind_llm.errors import ConfigurationError
 
-CONFIG_DIR_ENV = "DOUBLEBLIND_CONFIG_DIR"
 MODE_ENV = "DOUBLEBLIND_LLM_MODE"
 PACKAGE_REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -58,24 +57,10 @@ class LLMSettings(FrozenModel):
             raise ConfigurationError(f"Model alias '{alias}' is not defined in models.yaml")
         return self.models[alias]
 
-    def model_for_role(self, name: str) -> ModelSpec:
-        return self.model(self.role(name).model)
-
     def price_for(self, model_id: str) -> Price:
         if model_id not in self.pricing:
             raise ConfigurationError(f"Model '{model_id}' has no entry in pricing.yaml")
         return self.pricing[model_id]
-
-
-def find_repo_root(start: Path | None = None) -> Path:
-    override = os.environ.get(CONFIG_DIR_ENV)
-    if override:
-        return Path(override).resolve().parent
-    current = (start or Path.cwd()).resolve()
-    for candidate in (current, *current.parents):
-        if (candidate / "config" / "models.yaml").is_file():
-            return candidate
-    return PACKAGE_REPO_ROOT
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -88,8 +73,7 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_settings(config_dir: Path | None = None) -> LLMSettings:
-    repo_root = find_repo_root()
-    directory = config_dir or Path(os.environ.get(CONFIG_DIR_ENV, repo_root / "config"))
+    directory = config_dir or PACKAGE_REPO_ROOT / "config"
     models_file = read_yaml(directory / "models.yaml")
     pricing_file = read_yaml(directory / "pricing.yaml")
     models = {
@@ -108,7 +92,7 @@ def load_settings(config_dir: Path | None = None) -> LLMSettings:
         models=models,
         roles=roles,
         pricing=pricing,
-        repo_root=repo_root,
+        repo_root=PACKAGE_REPO_ROOT,
         config_dir=directory,
     )
 

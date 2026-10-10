@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -74,14 +74,6 @@ class Finding:
         location = f"{self.path}: " if self.path else ""
         return f"{self.severity:<7} [{self.rule}] {location}{self.message}"
 
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "rule": self.rule,
-            "severity": self.severity,
-            "path": self.path,
-            "message": self.message,
-        }
-
 
 @dataclass
 class ValidationReport:
@@ -115,7 +107,7 @@ class ValidationReport:
             "ok": self.ok,
             "errors": len(self.errors),
             "warnings": len(self.warnings),
-            "findings": [finding.to_dict() for finding in self.findings],
+            "findings": [asdict(finding) for finding in self.findings],
         }
 
 

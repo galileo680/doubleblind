@@ -3,7 +3,6 @@ import json
 import os
 import time
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import openai
@@ -22,12 +21,7 @@ from doubleblind_llm.budget import (
     ledger_path_from_env,
     spend_limit_from_env,
 )
-from doubleblind_llm.capabilities import (
-    CapabilityReport,
-    ModelCapabilities,
-    default_capabilities,
-    load_capabilities,
-)
+from doubleblind_llm.capabilities import CapabilityReport, ModelCapabilities, load_capabilities
 from doubleblind_llm.cassette import Cassette, cassette_path_from_env, fingerprint
 from doubleblind_llm.domain import (
     LLMCallEvent,
@@ -51,7 +45,7 @@ from doubleblind_llm.parsing import (
     schema_instructions,
     split_reasoning,
 )
-from doubleblind_llm.pricing import cost_usd, estimate_prompt_tokens, upper_bound_cost_usd
+from doubleblind_llm.pricing import cost_usd, estimate_prompt_tokens
 from doubleblind_llm.settings import (
     LLMSettings,
     Mode,
@@ -65,6 +59,7 @@ from doubleblind_llm.settings import (
 API_KEY_ENV = "NEBIUS_API_KEY"
 REPLAY_DELAY_ENV = "DOUBLEBLIND_REPLAY_DELAY_MS"
 MAX_REPAIRS = 2
+MAX_ATTEMPTS = 5
 REQUEST_TIMEOUT_SECONDS = 180.0
 REPAIR_SYSTEM_PROMPT = (
     "You repair JSON documents. Return ONLY a corrected JSON object that satisfies the schema, "
@@ -75,13 +70,7 @@ CallListener = Callable[[LLMCallEvent], None]
 
 
 def is_retryable(error: BaseException) -> bool:
-    if isinstance(
-        error,
-        openai.RateLimitError
-        | openai.APIConnectionError
-        | openai.APITimeoutError
-        | openai.InternalServerError,
-    ):
+    if isinstance(error, openai.RateLimitError | openai.APIConnectionError):
         return True
     return isinstance(error, openai.APIStatusError) and error.status_code >= 500
 
@@ -114,7 +103,6 @@ class LLMClient:
         on_call: CallListener | None = None,
         http_client: Any = None,
         retry_wait_seconds: float = 1.0,
-        max_attempts: int = 5,
         replay_delay_ms: int = 0,
     ) -> None:
         if mode in ("record", "replay") and cassette is None:
@@ -129,9 +117,8 @@ class LLMClient:
             if ledger is not None and spend_limit_usd is not None
             else None
         )
-        self.listeners: list[CallListener] = [on_call] if on_call else []
+        self.on_call = on_call
         self.retry_wait_seconds = retry_wait_seconds
-        self.max_attempts = max_attempts
         self.replay_delay_ms = replay_delay_ms
         self._api_key = api_key
         self._http_client = http_client
@@ -145,14 +132,13 @@ class LLMClient:
         cls,
         *,
         on_call: CallListener | None = None,
-        cassette_path: Path | None = None,
         mode: Mode | None = None,
     ) -> "LLMClient":
         settings = load_settings()
         load_dotenv(settings.repo_root / ".env")
         resolved_mode = mode or mode_from_env()
         cassette = (
-            Cassette(cassette_path or cassette_path_from_env(settings.repo_root))
+            Cassette(cassette_path_from_env(settings.repo_root))
             if resolved_mode in ("record", "replay")
             else None
         )
@@ -167,14 +153,6 @@ class LLMClient:
             on_call=on_call,
             replay_delay_ms=int(os.environ.get(REPLAY_DELAY_ENV, "0")),
         )
-
-    def add_listener(self, listener: CallListener) -> None:
-        self.listeners.append(listener)
-
-    def capabilities_for(self, model: ModelSpec) -> ModelCapabilities:
-        if self.capabilities is None:
-            return default_capabilities(model.alias, model.id)
-        return self.capabilities.for_alias(model.alias, model.id)
 
     def openai_client(self) -> AsyncOpenAI:
         if self._openai is None:
@@ -196,7 +174,8 @@ class LLMClient:
     def build_payload(
         self, request: LLMRequest, role: RoleSettings, model: ModelSpec
     ) -> tuple[dict[str, Any], ToolMode | None]:
-        capabilities = self.capabilities_for(model)
+        known = self.capabilities.models.get(model.alias) if self.capabilities else None
+        capabilities = known or ModelCapabilities(alias=model.alias, id=model.id)
         thinking = request.thinking or role.thinking
         additions: list[str] = []
         payload: dict[str, Any] = {
@@ -206,9 +185,8 @@ class LLMClient:
         temperature = request.temperature if request.temperature is not None else role.temperature
         if temperature is not None:
             payload["temperature"] = temperature
-        top_p = request.top_p if request.top_p is not None else role.top_p
-        if top_p is not None:
-            payload["top_p"] = top_p
+        if role.top_p is not None:
+            payload["top_p"] = role.top_p
         extra_body: dict[str, Any] = {}
         toggle = capabilities.thinking.toggle
         if toggle == "chat_template_kwargs":
@@ -216,7 +194,7 @@ class LLMClient:
         elif toggle == "system_prompt":
             additions.append("/think" if thinking == "on" else "/no_think")
         budget = request.reasoning_budget or role.reasoning_budget
-        if thinking == "on" and budget and capabilities.thinking.reasoning_budget_param:
+        if thinking == "on" and budget:
             extra_body["reasoning_budget"] = budget
         tool_mode: ToolMode | None = None
         if request.tools:
@@ -274,7 +252,6 @@ class LLMClient:
             cache_key=key,
             finish_reason=raw.finish_reason,
             latency_ms=raw.latency_ms,
-            tool_mode=tool_mode,
             from_cache=self.mode == "replay",
         )
         if request.response_schema is None or not allow_repair:
@@ -359,13 +336,26 @@ class LLMClient:
         party: str | None = None,
         cache_key: str | None = None,
         note: str | None = None,
-        max_attempts: int | None = None,
+        max_attempts: int = MAX_ATTEMPTS,
     ) -> RawCompletion:
         price = self.settings.price_for(model.id)
-        estimate = upper_bound_cost_usd(
-            price, estimate_prompt_tokens(payload), int(payload.get("max_tokens", 0))
+        prompt_estimate = estimate_prompt_tokens(payload)
+        estimate = cost_usd(
+            price,
+            Usage(
+                prompt_tokens=prompt_estimate,
+                completion_tokens=int(payload.get("max_tokens", 0)),
+            ),
         )
         client = self.openai_client()
+        retrying = AsyncRetrying(
+            stop=stop_after_attempt(max_attempts),
+            wait=wait_exponential(
+                multiplier=self.retry_wait_seconds, min=0, max=8 * self.retry_wait_seconds
+            ),
+            retry=retry_if_exception(is_retryable),
+            reraise=True,
+        )
         async with self._semaphore(model):
             async with self._budget_lock:
                 if self.guard is not None:
@@ -373,7 +363,9 @@ class LLMClient:
                 self._reserved_usd += estimate
             try:
                 started = time.perf_counter()
-                completion = await self._create(client, payload, max_attempts)
+                async for attempt in retrying:
+                    with attempt:
+                        completion = await client.chat.completions.create(**payload)
                 latency_ms = int((time.perf_counter() - started) * 1000)
             finally:
                 async with self._budget_lock:
@@ -387,7 +379,7 @@ class LLMClient:
             )
             if completion.usage is not None
             else Usage(
-                prompt_tokens=estimate_prompt_tokens(payload),
+                prompt_tokens=prompt_estimate,
                 completion_tokens=0,
                 estimated=True,
             )
@@ -421,22 +413,6 @@ class LLMClient:
         self._emit(role_name, raw, session_id, party, from_cache=False)
         return raw
 
-    async def _create(
-        self, client: AsyncOpenAI, payload: dict[str, Any], max_attempts: int | None
-    ) -> Any:
-        retrying = AsyncRetrying(
-            stop=stop_after_attempt(max_attempts or self.max_attempts),
-            wait=wait_exponential(
-                multiplier=self.retry_wait_seconds, min=0, max=8 * self.retry_wait_seconds
-            ),
-            retry=retry_if_exception(is_retryable),
-            reraise=True,
-        )
-        async for attempt in retrying:
-            with attempt:
-                return await client.chat.completions.create(**payload)
-        raise RuntimeError("retry loop finished without a result")
-
     async def list_model_ids(self) -> set[str]:
         page = await self.openai_client().models.list()
         return {model.id for model in page.data}
@@ -450,19 +426,19 @@ class LLMClient:
         *,
         from_cache: bool,
     ) -> None:
-        if not self.listeners:
+        if self.on_call is None:
             return
-        event = LLMCallEvent(
-            role=role_name,
-            model=raw.model,
-            mode=self.mode,
-            from_cache=from_cache,
-            prompt_tokens=raw.usage.prompt_tokens,
-            completion_tokens=raw.usage.completion_tokens,
-            cost_usd=raw.cost_usd,
-            latency_ms=raw.latency_ms,
-            session_id=session_id,
-            party=party,
+        self.on_call(
+            LLMCallEvent(
+                role=role_name,
+                model=raw.model,
+                mode=self.mode,
+                from_cache=from_cache,
+                prompt_tokens=raw.usage.prompt_tokens,
+                completion_tokens=raw.usage.completion_tokens,
+                cost_usd=raw.cost_usd,
+                latency_ms=raw.latency_ms,
+                session_id=session_id,
+                party=party,
+            )
         )
-        for listener in self.listeners:
-            listener(event)

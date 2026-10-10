@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -26,7 +27,9 @@ class SessionRecord(SQLModel, table=True):
     signed_contract_version: int | None = None
     observer_token_hash: str = Field(index=True)
     secrets_json: str = "{}"
-    metrics_json: str = "{}"
+    metrics_json: str = json.dumps(
+        {"cost_usd": 0.0, "tokens": 0, "code_lines_shared": 0, "blocked_count": 0}
+    )
     e2e_feedback_json: str | None = None
 
 

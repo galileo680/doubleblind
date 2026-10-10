@@ -8,7 +8,7 @@ from contract_fixtures import BINDING_SCHEMA_PATH, PARCELLY_BINDING, SPOKES_BIND
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
-from doubleblind_contract.loader import InvalidStructureError, load_binding, load_binding_text
+from doubleblind_contract.loader import ContractLoadError, load_binding, load_binding_text
 from doubleblind_contract.models import Binding
 
 BindingMutation = Callable[[dict[str, Any]], None]
@@ -118,7 +118,7 @@ def test_binding_environment_placeholders_are_filled_when_env_is_given() -> None
 def test_broken_binding_reports_the_reason() -> None:
     text = SPOKES_BINDING.read_text(encoding="utf-8").replace("  start: ", "  begin: ")
 
-    with pytest.raises(InvalidStructureError) as caught:
+    with pytest.raises(ContractLoadError) as caught:
         load_binding_text(text)
 
     assert any(problem.path == "app.begin" for problem in caught.value.problems)

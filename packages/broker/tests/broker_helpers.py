@@ -8,10 +8,10 @@ from fastapi.testclient import TestClient
 from scripted_party import reference_binding, reference_contract, round_one, round_two
 
 from doubleblind_broker.app import create_app
-from doubleblind_broker.contracts import load_yaml
 from doubleblind_broker.db import build_engine
 from doubleblind_broker.e2e import E2EExecutor
 from doubleblind_broker.service import BrokerService, BrokerSettings
+from doubleblind_contract.loader import parse_yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRESETS_DIR = REPO_ROOT / "demo" / "presets"
@@ -104,12 +104,14 @@ REFERENCE = reference_contract()
 
 
 def opening(session: Broker) -> Any:
-    return session.turn("agent_parcelly", round_one(load_yaml(session.get("/contract")), REFERENCE))
+    return session.turn(
+        "agent_parcelly", round_one(parse_yaml(session.get("/contract")), REFERENCE)
+    )
 
 
 def converge(session: Broker) -> None:
     opening(session)
-    session.turn("agent_spokes", round_two(load_yaml(session.get("/contract")), REFERENCE))
+    session.turn("agent_spokes", round_two(parse_yaml(session.get("/contract")), REFERENCE))
     session.turn("agent_parcelly", status="ready_to_sign")
     session.turn("agent_spokes", status="ready_to_sign")
 
@@ -119,7 +121,7 @@ def signed(session: Broker) -> dict[str, Any]:
     converge(session)
     session.post("/signatures", "human_spokes", {"version": 3}, 201)
     session.post("/signatures", "human_parcelly", {"version": 3}, 201)
-    return load_yaml(session.get("/contract"))
+    return parse_yaml(session.get("/contract"))
 
 
 def run_payload(

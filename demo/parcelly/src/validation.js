@@ -2,16 +2,11 @@ import Ajv from "ajv";
 import { ApiError } from "./errors.js";
 import { postcodeMatchesCity } from "./postcodes.js";
 
-export const MAX_PARCEL_WEIGHT_G = 25000;
-export const MIN_PALLET_WEIGHT_G = 25001;
-export const MAX_PALLET_WEIGHT_G = 1000000;
-export const SIZE_LIMITS_G = Object.freeze({ A: 5000, B: 15000, C: 25000 });
-export const ADVANCEABLE_STATUSES = Object.freeze([
-  "COLLECTED",
-  "IN_TRANSIT",
-  "DELIVERED",
-  "RETURNED",
-]);
+const MAX_PARCEL_WEIGHT_G = 25000;
+const MIN_PALLET_WEIGHT_G = 25001;
+const MAX_PALLET_WEIGHT_G = 1000000;
+const SIZE_LIMITS_G = Object.freeze({ A: 5000, B: 15000, C: 25000 });
+const ADVANCEABLE_STATUSES = Object.freeze(["COLLECTED", "IN_TRANSIT", "DELIVERED", "RETURNED"]);
 
 const PHONE_PATTERN = /^\+48\d{9}$/;
 const POSTCODE_PATTERN = /^\d{2}-\d{3}$/;
@@ -129,14 +124,9 @@ function describe(error) {
 }
 
 function assertSchema(validator, body) {
-  if (validator(body)) {
-    return;
+  if (!validator(body)) {
+    throw new ApiError(400, "INVALID_REQUEST", describe(validator.errors[0]));
   }
-  const details = validator.errors.map((error) => ({
-    path: error.instancePath || "/",
-    message: describe(error),
-  }));
-  throw new ApiError(400, "INVALID_REQUEST", details[0].message, details);
 }
 
 function assertReceiverFormats(receiver) {

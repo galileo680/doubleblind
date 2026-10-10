@@ -4,9 +4,7 @@ from pathlib import Path
 import pytest
 from golden_support import CONTRACT, Workspace, build_workspace, run_repository_tests
 
-from doubleblind_contract.runner_consumer import run_consumer_tests
-from doubleblind_contract.runner_e2e import run_e2e_tests
-from doubleblind_contract.runner_provider import run_provider_tests
+from doubleblind_contract.runner import run_consumer_tests, run_e2e_tests, run_provider_tests
 from doubleblind_contract.runtime import RunReport
 
 pytestmark = pytest.mark.golden
@@ -45,7 +43,11 @@ MUTATIONS = {
 
 
 def failed(report: RunReport) -> set[str]:
-    return {scenario_id for scenario_id, status in report.statuses().items() if status != "passed"}
+    return {scenario.id for scenario in report.scenarios if scenario.status != "passed"}
+
+
+def scenario_ids(report: RunReport) -> list[str]:
+    return [scenario.id for scenario in report.scenarios]
 
 
 def explain(report: RunReport) -> str:
@@ -80,14 +82,14 @@ def test_reference_implementations_keep_the_repository_tests_green(reference: Wo
 def test_reference_consumer_passes_every_consumer_scenario(reference: Workspace) -> None:
     report = run_consumer_tests(CONTRACT, reference.consumer_binding, env=reference.env())
 
-    assert list(report.statuses()) == CONSUMER_SCENARIOS
+    assert scenario_ids(report) == CONSUMER_SCENARIOS
     assert report.ok, explain(report)
 
 
 def test_reference_provider_passes_every_provider_scenario(reference: Workspace) -> None:
     report = run_provider_tests(CONTRACT, reference.provider_binding, env=reference.env())
 
-    assert list(report.statuses()) == PROVIDER_SCENARIOS
+    assert scenario_ids(report) == PROVIDER_SCENARIOS
     assert report.ok, explain(report)
 
 
@@ -100,7 +102,7 @@ def test_both_reference_apps_pass_the_end_to_end_scenarios(reference: Workspace)
         start_apps=True,
     )
 
-    assert list(report.statuses()) == ["E1", "E2"]
+    assert scenario_ids(report) == ["E1", "E2"]
     assert report.ok, explain(report)
 
 
@@ -114,7 +116,9 @@ def test_each_mutation_turns_exactly_the_expected_scenarios_red(
         report = run_consumer_tests(CONTRACT, reference.consumer_binding, env=reference.env())
 
     assert failed(report) == expected, explain(report)
-    assert all(report.statuses()[scenario] == "failed" for scenario in expected)
+    assert all(
+        scenario.status == "failed" for scenario in report.scenarios if scenario.id in expected
+    )
 
 
 def test_kg_mutation_reports_the_exact_field(reference: Workspace) -> None:
@@ -145,7 +149,7 @@ def test_provider_without_the_flag_fails_only_the_idempotency_scenario(
 def test_untouched_demo_fails_with_readable_errors_not_crashes(untouched: Workspace) -> None:
     report = run_consumer_tests(CONTRACT, untouched.consumer_binding, env=untouched.env())
 
-    assert set(report.statuses().values()) == {"failed"}
+    assert {scenario.status for scenario in report.scenarios} == {"failed"}
     first = report.scenarios[0].failures[0]
     assert first.path == "status"
     assert "consumer action 'reset' failed" in first.message
@@ -173,11 +177,6 @@ def test_cli_runs_provider_tests_and_writes_reports(reference: Workspace, tmp_pa
 
     from doubleblind_contract.cli import app
 
-    env_file = tmp_path / "golden.env"
-    env_file.write_text(
-        "\n".join(f"{key}={value}" for key, value in reference.env().items() if "\n" not in value),
-        encoding="utf-8",
-    )
     report_path, junit_path = tmp_path / "report.json", tmp_path / "junit.xml"
 
     result = CliRunner().invoke(
@@ -190,13 +189,12 @@ def test_cli_runs_provider_tests_and_writes_reports(reference: Workspace, tmp_pa
             str(reference.provider_binding),
             "--scenarios",
             "P1,P3",
-            "--env-file",
-            str(env_file),
             "--report",
             str(report_path),
             "--junit",
             str(junit_path),
         ],
+        env=reference.env(),
     )
 
     assert result.exit_code == 0, result.output

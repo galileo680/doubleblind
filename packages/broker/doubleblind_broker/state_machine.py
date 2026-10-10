@@ -36,7 +36,6 @@ class Effect(StrEnum):
     MARK_SIGNED = "mark_signed"
     GENERATE_SECRETS = "generate_secrets"
     REQUEST_IMPLEMENTATION = "request_implementation"
-    REPORTER_TURN = "reporter_turn"
     RUN_E2E = "run_e2e"
     ISSUE_CERTIFICATE = "issue_certificate"
     SHARE_E2E_REPORT = "share_e2e_report"
@@ -59,7 +58,7 @@ TRANSITIONS: dict[tuple[State, Trigger], tuple[State, tuple[Effect, ...]]] = {
         (Effect.MARK_SIGNED, Effect.GENERATE_SECRETS, Effect.REQUEST_IMPLEMENTATION),
     ),
     (State.IMPLEMENTING, Trigger.BOTH_READY): (State.E2E, (Effect.RUN_E2E,)),
-    (State.IMPLEMENTING, Trigger.CONTRACT_GAP): (State.AMENDING, (Effect.REPORTER_TURN,)),
+    (State.IMPLEMENTING, Trigger.CONTRACT_GAP): (State.AMENDING, ()),
     (State.AMENDING, Trigger.CONVERGED): (State.AWAITING_SIGNATURES, (Effect.REQUEST_SIGNATURES,)),
     (State.AMENDING, Trigger.ROUNDS_EXHAUSTED): (State.ESCALATED, (Effect.NOTIFY_HUMANS,)),
     (State.E2E, Trigger.E2E_PASSED): (State.CERTIFIED, (Effect.ISSUE_CERTIFICATE,)),
@@ -68,10 +67,7 @@ TRANSITIONS: dict[tuple[State, Trigger], tuple[State, tuple[Effect, ...]]] = {
 
 
 class InvalidTransitionError(Exception):
-    def __init__(self, state: State, trigger: Trigger) -> None:
-        super().__init__(f"cannot apply '{trigger}' in state {state}")
-        self.state = state
-        self.trigger = trigger
+    pass
 
 
 def transition(state: State, trigger: Trigger) -> tuple[State, tuple[Effect, ...]]:
@@ -80,11 +76,4 @@ def transition(state: State, trigger: Trigger) -> tuple[State, tuple[Effect, ...
     try:
         return TRANSITIONS[(state, trigger)]
     except KeyError as error:
-        raise InvalidTransitionError(state, trigger) from error
-
-
-def allowed_triggers(state: State) -> list[Trigger]:
-    triggers = [trigger for (source, trigger) in TRANSITIONS if source is state]
-    if state not in TERMINAL_STATES:
-        triggers.append(Trigger.FAILURE)
-    return triggers
+        raise InvalidTransitionError(f"cannot apply '{trigger}' in state {state}") from error

@@ -12,7 +12,7 @@ from typing import IO, Any, Literal
 import httpx
 from jsonpath_ng import parse as parse_jsonpath
 
-from doubleblind_contract.models import AppSpec, Binding, HttpCall
+from doubleblind_contract.models import AppSpec, Binding
 from doubleblind_contract.templating import render
 
 CallKind = Literal["action", "query"]
@@ -20,10 +20,6 @@ STARTUP_TIMEOUT_S = 30.0
 STOP_TIMEOUT_S = 10.0
 LOG_TAIL_LINES = 50
 REQUEST_TIMEOUT_S = 15.0
-
-
-class BindingCallError(Exception):
-    pass
 
 
 class AppStartError(Exception):
@@ -67,21 +63,13 @@ def capture_values(body: Any, capture: Mapping[str, str]) -> tuple[dict[str, Any
 
 
 class PartyClient:
-    def __init__(self, binding: Binding, http: httpx.Client, base_url: str | None = None) -> None:
+    def __init__(self, binding: Binding, http: httpx.Client) -> None:
         self.binding = binding
         self.http = http
-        self.base_url = (base_url or binding.base_url).rstrip("/")
-
-    def find(self, kind: CallKind, name: str) -> HttpCall:
-        calls = self.binding.actions if kind == "action" else self.binding.queries
-        if name not in calls:
-            raise BindingCallError(
-                f"{kind} '{name}' is not defined in the {self.binding.side} binding"
-            )
-        return calls[name]
+        self.base_url = binding.base_url.rstrip("/")
 
     def call(self, kind: CallKind, name: str, variables: Mapping[str, Any]) -> CallResult:
-        spec = self.find(kind, name)
+        spec = (self.binding.actions if kind == "action" else self.binding.queries)[name]
         path = render(spec.path, variables)
         headers = render(spec.headers or {}, variables)
         query = render(spec.query or {}, variables)
@@ -134,10 +122,8 @@ class ManagedApp:
         return env
 
     def start(self, variables: Mapping[str, Any], timeout_s: float = STARTUP_TIMEOUT_S) -> None:
-        if self.spec.start is None:
-            raise AppStartError(f"{self.name}: no start command in the binding", "")
         env = self.child_env(variables)
-        command = resolve_command(self.spec.start, env)
+        command = resolve_command(self.spec.start or "", env)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_file = self.log_path.open("wb")
         try:
@@ -186,10 +172,10 @@ class ManagedApp:
             self.log_file.close()
             self.log_file = None
 
-    def log_tail(self, lines: int = LOG_TAIL_LINES) -> str:
+    def log_tail(self) -> str:
         if self.log_file is not None:
             self.log_file.flush()
         if not self.log_path.exists():
             return ""
         content = self.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-        return "\n".join(content[-lines:])
+        return "\n".join(content[-LOG_TAIL_LINES:])

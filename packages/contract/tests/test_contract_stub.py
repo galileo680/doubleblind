@@ -7,6 +7,7 @@ from contract_fixtures import MINIMAL, SIGNED
 from runner_fakes import SECRETS
 
 from doubleblind_contract.capture_server import WebhookCapture
+from doubleblind_contract.http_server import header_value
 from doubleblind_contract.loader import load_contract, load_contract_text
 from doubleblind_contract.runtime import ConfigurationError
 from doubleblind_contract.signing import verify
@@ -134,9 +135,13 @@ def test_emits_signed_webhooks_to_the_consumer() -> None:
 
     assert control.json()["status"] == 200
     assert json.loads(received[0].raw_body) == event
-    assert verify("hook-secret", received[0].raw_body, received[0].header("X-Signature"))
-    assert not verify("hook-secret", received[1].raw_body, received[1].header("X-Signature"))
-    assert received[2].header("X-Signature") is None
+    assert verify(
+        "hook-secret", received[0].raw_body, header_value(received[0].headers, "X-Signature")
+    )
+    assert not verify(
+        "hook-secret", received[1].raw_body, header_value(received[1].headers, "X-Signature")
+    )
+    assert header_value(received[2].headers, "X-Signature") is None
 
 
 def test_emit_needs_a_known_webhook_and_a_receiver(stub: ProviderStub) -> None:

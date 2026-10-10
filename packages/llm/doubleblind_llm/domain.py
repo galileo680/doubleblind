@@ -1,4 +1,3 @@
-import json
 from enum import StrEnum
 from typing import Any
 
@@ -27,7 +26,6 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: dict[str, Any]
-    raw_arguments: str
 
 
 class Usage(BaseModel):
@@ -44,7 +42,6 @@ class LLMRequest(BaseModel):
     thinking: ThinkingSetting | None = None
     reasoning_budget: int | None = Field(default=None, gt=0)
     temperature: float | None = None
-    top_p: float | None = None
     max_tokens: int | None = Field(default=None, gt=0)
     session_id: str | None = None
     party: str | None = None
@@ -78,31 +75,8 @@ class LLMResponse(BaseModel):
     cache_key: str
     finish_reason: str | None
     latency_ms: int
-    tool_mode: ToolMode | None
     from_cache: bool = False
     repairs: int = 0
-
-    def assistant_message(self) -> dict[str, Any]:
-        if self.tool_mode == ToolMode.NATIVE and self.tool_calls:
-            return {
-                "role": "assistant",
-                "content": self.content,
-                "tool_calls": [
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {"name": call.name, "arguments": call.raw_arguments},
-                    }
-                    for call in self.tool_calls
-                ],
-            }
-        return {"role": "assistant", "content": self.content or ""}
-
-    def tool_result_message(self, call: ToolCall, result: str | dict[str, Any]) -> dict[str, Any]:
-        text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
-        if self.tool_mode == ToolMode.NATIVE:
-            return {"role": "tool", "tool_call_id": call.id, "content": text}
-        return {"role": "user", "content": f"Result of tool `{call.name}`:\n{text}"}
 
 
 class LLMCallEvent(BaseModel):

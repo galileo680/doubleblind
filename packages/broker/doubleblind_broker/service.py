@@ -48,10 +48,9 @@ from doubleblind_contract.guard_rules import (
     check_test_run,
     check_turn,
 )
-from doubleblind_contract.loader import ContractLoadError, load_binding_text, load_contract_text
-from doubleblind_contract.models import Contract
+from doubleblind_contract.loader import load_binding_text, load_contract_text, parse_yaml
 from doubleblind_contract.runtime import RunReport
-from doubleblind_contract.validate import check_binding_text
+from doubleblind_contract.validate import check_binding_text, validate_contract_data
 from doubleblind_sandbox.provider import ProbeResult
 
 logger = logging.getLogger(__name__)
@@ -142,7 +141,6 @@ class BrokerSettings:
 @dataclass
 class Outbox:
     events: list[tuple[str, str, dict[str, Any], str]] = field(default_factory=list)
-    tasks: list[Coroutine[Any, Any, None]] = field(default_factory=list)
 
     def add(
         self, type_: str, actor: str, payload: dict[str, Any], visibility: str = "shared"
@@ -169,9 +167,7 @@ class BrokerService:
         self.e2e_executor: E2EExecutor = e2e_executor or UnavailableE2E()
         self.simulator: HumanSimulator = simulator or DefaultOptionSimulator()
         self.events = EventLog(engine)
-        self.locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.autopilot_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self.changes: dict[str, asyncio.Event] = {}
         self.background: set[asyncio.Task[None]] = set()
         self.presets: dict[str, Preset] = {}
         self.gateway = IntegrationGateway(self.gateway_allowlist, self.gateway_event)
@@ -184,21 +180,9 @@ class BrokerService:
                 raise BrokerError(400, "UNKNOWN_PRESET", str(error)) from error
         return self.presets[name]
 
-    def change_signal(self, session_id: str) -> asyncio.Event:
-        return self.changes.setdefault(session_id, asyncio.Event())
-
-    def notify(self, session_id: str) -> None:
-        signal = self.changes.pop(session_id, None)
-        if signal is not None:
-            signal.set()
-
     def flush(self, session_id: str, outbox: Outbox) -> None:
         for type_, actor, payload, visibility in outbox.events:
             self.events.append(session_id, type_, actor, payload, visibility)
-        if outbox.events:
-            self.notify(session_id)
-        for coroutine in outbox.tasks:
-            self.spawn(coroutine)
 
     def spawn(self, coroutine: Coroutine[Any, Any, None]) -> None:
         task = asyncio.get_running_loop().create_task(coroutine)
@@ -266,9 +250,7 @@ class BrokerService:
         return record.yaml_text
 
     def current_contract(self, db: Session, record: SessionRecord) -> dict[str, Any]:
-        return contracts.load_yaml(
-            self.contract_text(db, record.id, record.current_contract_version)
-        )
+        return parse_yaml(self.contract_text(db, record.id, record.current_contract_version))
 
     def store_version(
         self,
@@ -298,20 +280,10 @@ class BrokerService:
         )
         return version
 
-    def metrics(self, record: SessionRecord) -> dict[str, Any]:
-        defaults: dict[str, Any] = {
-            "cost_usd": 0.0,
-            "tokens": 0,
-            "code_lines_shared": 0,
-            "blocked_count": 0,
-        }
-        defaults.update(json.loads(record.metrics_json))
-        return defaults
-
-    def update_metrics(self, record: SessionRecord, outbox: Outbox, **changes: Any) -> None:
-        metrics = self.metrics(record)
+    def update_metrics(self, record: SessionRecord, outbox: Outbox, **changes: int) -> None:
+        metrics = json.loads(record.metrics_json)
         for key, value in changes.items():
-            metrics[key] = metrics.get(key, 0) + value
+            metrics[key] += value
         record.metrics_json = json.dumps(metrics)
         outbox.add("metrics.update", "broker", metrics, "observer")
 
@@ -372,7 +344,7 @@ class BrokerService:
             for party in roles.values():
                 party.status = "awaiting_signature"
             if self.settings.autopilot:
-                outbox.tasks.append(self.autopilot_sign(record.id))
+                self.spawn(self.autopilot_sign(record.id))
         elif effect is Effect.NOTIFY_HUMANS:
             outbox.add("session.escalated", "broker", {"round": record.round})
         elif effect is Effect.MARK_SIGNED:
@@ -386,7 +358,7 @@ class BrokerService:
             for party in roles.values():
                 party.status = "implementing"
         elif effect is Effect.RUN_E2E:
-            outbox.tasks.append(self.run_e2e(record.id))
+            self.spawn(self.run_e2e(record.id))
         elif effect is Effect.ISSUE_CERTIFICATE:
             outbox.add("certificate.issued", "broker", {"version": record.signed_contract_version})
         elif effect is Effect.SHARE_E2E_REPORT:
@@ -397,11 +369,9 @@ class BrokerService:
         self, db: Session, record: SessionRecord, roles: dict[Role, PartyRecord], outbox: Outbox
     ) -> None:
         version = record.current_contract_version
-        stored = db.get(ContractVersionRecord, (record.id, version))
-        if stored is None:
-            raise BrokerError(500, "MISSING_VERSION", f"contract version {version} is missing")
+        stored = db.get_one(ContractVersionRecord, (record.id, version))
         signed = contracts.mark_signed(
-            contracts.load_yaml(stored.yaml_text),
+            parse_yaml(stored.yaml_text),
             [roles["consumer"].party_key, roles["provider"].party_key],
         )
         stored.yaml_text = contracts.dump_yaml(signed)
@@ -409,9 +379,7 @@ class BrokerService:
         record.signed_contract_version = version
         outbox.add("contract.signed", "broker", {"version": version})
 
-    async def create_session(
-        self, principal: Principal, name: str, preset_name: str, max_rounds: int | None = None
-    ) -> dict[str, Any]:
+    def create_session(self, principal: Principal, name: str, preset_name: str) -> dict[str, Any]:
         if self.settings.admin_token and principal.kind != "admin":
             raise BrokerError(403, "FORBIDDEN", "creating sessions needs the admin token")
         preset = self.preset(preset_name)
@@ -423,7 +391,7 @@ class BrokerService:
             name=name,
             preset=preset_name,
             state=State.CREATED.value,
-            max_rounds=max_rounds or self.settings.max_rounds,
+            max_rounds=self.settings.max_rounds,
             created_at=now,
             updated_at=now,
             consumer_party_id=preset.consumer.party,
@@ -472,17 +440,16 @@ class BrokerService:
         self.flush(session_id, outbox)
         return {"session_id": session_id, "tokens": tokens}
 
-    async def start(self, principal: Principal, session_id: str) -> dict[str, Any]:
+    def start(self, principal: Principal, session_id: str) -> dict[str, Any]:
         self.authorize(principal, session_id, "observer", "admin")
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, State.CREATED)
-                self.apply_trigger(db, record, Trigger.START, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, State.CREATED)
+            self.apply_trigger(db, record, Trigger.START, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return self.session_view(principal, session_id)
 
     def require_state(self, record: SessionRecord, *states: State) -> None:
@@ -520,7 +487,7 @@ class BrokerService:
                 }
                 for role, party in roles.items()
             ],
-            "metrics": self.metrics(record),
+            "metrics": json.loads(record.metrics_json),
         }
 
     def unanswered_questions(self, db: Session, session_id: str) -> int:
@@ -539,16 +506,19 @@ class BrokerService:
         remaining = self.settings.next_action_wait_s if wait_s is None else wait_s
         loop = asyncio.get_running_loop()
         deadline = loop.time() + remaining
-        while True:
-            signal = self.change_signal(session_id)
-            action = self.compute_action(session_id, principal.party_key)
-            remaining = deadline - loop.time()
-            if action["action"] != "wait" or remaining <= 0:
-                return action
-            try:
-                await asyncio.wait_for(signal.wait(), remaining)
-            except TimeoutError:
-                return action
+        changes = self.events.subscribe(session_id)
+        try:
+            while True:
+                action = self.compute_action(session_id, principal.party_key)
+                remaining = deadline - loop.time()
+                if action["action"] != "wait" or remaining <= 0:
+                    return action
+                try:
+                    await asyncio.wait_for(changes.get(), remaining)
+                except TimeoutError:
+                    return action
+        finally:
+            self.events.unsubscribe(session_id, changes)
 
     def compute_action(self, session_id: str, party_key: str | None) -> dict[str, Any]:
         with open_session(self.engine) as db:
@@ -580,129 +550,120 @@ class BrokerService:
                 return {"action": "implement", "context": context}
             return {"action": "wait", "context": {"state": state.value}}
 
-    async def submit_brief(
+    def submit_brief(
         self, principal: Principal, session_id: str, brief: dict[str, Any]
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, State.BRIEFING)
-                party = self.party(db, session_id, principal.party_key)
-                if party.brief_json is not None:
-                    raise BrokerError(409, "BRIEF_EXISTS", "the brief was already submitted")
-                preset = self.preset(record.preset)
-                self.guard(
-                    record, party.party_key, check_message(brief, preset.allowlist()), outbox, db
-                )
-                party.brief_json = json.dumps(brief, ensure_ascii=False)
-                party.status = "briefed"
-                db.add(party)
-                outbox.add(
-                    "brief.submitted", party.party_key, {"party": party.party_key, "brief": brief}
-                )
-                if all(p.brief_json is not None for p in self.roles(db, session_id).values()):
-                    self.apply_trigger(db, record, Trigger.BRIEFS_COMPLETE, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, State.BRIEFING)
+            party = self.party(db, session_id, principal.party_key)
+            if party.brief_json is not None:
+                raise BrokerError(409, "BRIEF_EXISTS", "the brief was already submitted")
+            preset = self.preset(record.preset)
+            self.guard(
+                record, party.party_key, check_message(brief, preset.allowlist()), outbox, db
+            )
+            party.brief_json = json.dumps(brief, ensure_ascii=False)
+            party.status = "briefed"
+            db.add(party)
+            outbox.add(
+                "brief.submitted", party.party_key, {"party": party.party_key, "brief": brief}
+            )
+            if all(p.brief_json is not None for p in self.roles(db, session_id).values()):
+                self.apply_trigger(db, record, Trigger.BRIEFS_COMPLETE, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return {"accepted": True}
 
-    def own_brief(
-        self, principal: Principal, session_id: str, counterparty: bool
-    ) -> dict[str, Any]:
+    def counterparty_brief(self, principal: Principal, session_id: str) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent", "human")
         with open_session(self.engine) as db:
-            roles = self.roles(db, session_id)
             mine = self.party(db, session_id, principal.party_key)
-            party = other(roles, mine.party_key) if counterparty else mine
+            party = other(self.roles(db, session_id), mine.party_key)
         if party.brief_json is None:
             raise BrokerError(404, "NO_BRIEF", f"{party.party_key} has not submitted a brief yet")
         brief: dict[str, Any] = json.loads(party.brief_json)
         return {"party": party.party_key, "role": party.role, "brief": brief}
 
-    async def submit_turn(
-        self, principal: Principal, session_id: str, turn: TurnIn
-    ) -> dict[str, Any]:
+    def submit_turn(self, principal: Principal, session_id: str, turn: TurnIn) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, *NEGOTIATION_STATES)
-                party = self.party(db, session_id, principal.party_key)
-                if record.turn_party != party.party_key:
-                    raise BrokerError(409, "NOT_YOUR_TURN", f"it is {record.turn_party}'s turn")
-                if turn.round != record.round + 1:
-                    raise BrokerError(
-                        409,
-                        "WRONG_ROUND",
-                        f"the next round is {record.round + 1}",
-                        record.round + 1,
-                    )
-                if turn.based_on_version != record.current_contract_version:
-                    raise BrokerError(
-                        409,
-                        "STALE_VERSION",
-                        f"the current contract version is {record.current_contract_version}",
-                        {"current_version": record.current_contract_version},
-                    )
-                preset = self.preset(record.preset)
-                payload = turn.model_dump()
-                verdict = check_turn(payload, preset.allowlist())
-                if verdict.blocked:
-                    self.reject_turn(db, record, party, turn, verdict.reasons, outbox)
-                    self.guard(record, party.party_key, verdict, outbox, db)
-                version_after = record.current_contract_version
-                if turn.patches:
-                    candidate = self.patched_contract(db, record, party, turn, outbox)
-                    version_after = self.store_version(
-                        db, record, candidate, party.party_key, outbox
-                    )
-                if verdict.code_lines:
-                    self.update_metrics(record, outbox, code_lines_shared=verdict.code_lines)
-                question_ids = self.create_questions(
-                    db, record, party, turn.questions_for_human, outbox
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, *NEGOTIATION_STATES)
+            party = self.party(db, session_id, principal.party_key)
+            if record.turn_party != party.party_key:
+                raise BrokerError(409, "NOT_YOUR_TURN", f"it is {record.turn_party}'s turn")
+            if turn.round != record.round + 1:
+                raise BrokerError(
+                    409,
+                    "WRONG_ROUND",
+                    f"the next round is {record.round + 1}",
+                    record.round + 1,
                 )
-                db.add(
-                    TurnRecord(
-                        session_id=session_id,
-                        round=turn.round,
-                        party_key=party.party_key,
-                        based_on_version=turn.based_on_version,
-                        message=turn.message,
-                        patches_json=json.dumps(turn.patches, ensure_ascii=False),
-                        status=turn.status,
-                        accepted=True,
-                        contract_version_after=version_after,
-                    )
+            if turn.based_on_version != record.current_contract_version:
+                raise BrokerError(
+                    409,
+                    "STALE_VERSION",
+                    f"the current contract version is {record.current_contract_version}",
+                    {"current_version": record.current_contract_version},
                 )
-                record.round = turn.round
-                party.last_turn_status = turn.status
-                party.last_accepted_version = version_after
-                party.last_turn_had_patches = bool(turn.patches)
-                db.add(party)
-                record.turn_party = other(self.roles(db, session_id), party.party_key).party_key
-                outbox.add(
-                    "turn.accepted",
-                    party.party_key,
-                    {
-                        "party": party.party_key,
-                        "round": turn.round,
-                        "message": turn.message,
-                        "status": turn.status,
-                        "patch_summary": contracts.patch_summary(turn.patches),
-                        "contract_version": version_after,
-                        "questions": question_ids,
-                    },
+            preset = self.preset(record.preset)
+            payload = turn.model_dump()
+            verdict = check_turn(payload, preset.allowlist())
+            if verdict.blocked:
+                self.reject_turn(db, record, party, turn, verdict.reasons, outbox)
+                self.guard(record, party.party_key, verdict, outbox, db)
+            version_after = record.current_contract_version
+            if turn.patches:
+                candidate = self.patched_contract(db, record, party, turn, outbox)
+                version_after = self.store_version(db, record, candidate, party.party_key, outbox)
+            self.guard(record, party.party_key, verdict, outbox, db)
+            question_ids = self.create_questions(
+                db, record, party, turn.questions_for_human, outbox
+            )
+            db.add(
+                TurnRecord(
+                    session_id=session_id,
+                    round=turn.round,
+                    party_key=party.party_key,
+                    based_on_version=turn.based_on_version,
+                    message=turn.message,
+                    patches_json=json.dumps(turn.patches, ensure_ascii=False),
+                    status=turn.status,
+                    accepted=True,
+                    contract_version_after=version_after,
                 )
-                self.after_turn(db, record, outbox)
-                if self.settings.autopilot:
-                    outbox.tasks += [self.autopilot_answer(session_id, qid) for qid in question_ids]
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+            )
+            record.round = turn.round
+            party.last_turn_status = turn.status
+            party.last_accepted_version = version_after
+            party.last_turn_had_patches = bool(turn.patches)
+            db.add(party)
+            record.turn_party = other(self.roles(db, session_id), party.party_key).party_key
+            outbox.add(
+                "turn.accepted",
+                party.party_key,
+                {
+                    "party": party.party_key,
+                    "round": turn.round,
+                    "message": turn.message,
+                    "status": turn.status,
+                    "patch_summary": contracts.patch_summary(turn.patches),
+                    "contract_version": version_after,
+                    "questions": question_ids,
+                },
+            )
+            self.after_turn(db, record, outbox)
+            if self.settings.autopilot:
+                for qid in question_ids:
+                    self.spawn(self.autopilot_answer(session_id, qid))
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return {
             "accepted": True,
             "round": turn.round,
@@ -751,7 +712,7 @@ class BrokerService:
             candidate = contracts.apply_patches(self.current_contract(db, record), turn.patches)
         except contracts.PatchError as error:
             self.fail_turn(db, record, party, turn, [str(error)], outbox)
-        report = contracts.validate(
+        report = validate_contract_data(
             contracts.with_version(candidate, record.current_contract_version + 1, "proposed")
         )
         if not report.ok:
@@ -833,7 +794,7 @@ class BrokerService:
             return False
         if self.unanswered_questions(db, record.id):
             return False
-        return contracts.validate(self.current_contract(db, record)).ok
+        return validate_contract_data(self.current_contract(db, record)).ok
 
     def list_turns(self, principal: Principal, session_id: str) -> list[dict[str, Any]]:
         self.authorize(principal, session_id)
@@ -896,191 +857,182 @@ class BrokerService:
             if principal.can_see(question.party_key)
         ]
 
-    async def answer_question(
-        self, principal: Principal, session_id: str, qid: str, answer: str
-    ) -> dict[str, Any]:
-        self.authorize(principal, session_id, "human", "admin")
-        return await self.record_answer(
-            session_id, qid, answer, principal.actor, principal.party_key
+    def answer_question(self, principal: Principal, qid: str, answer: str) -> dict[str, Any]:
+        if principal.kind != "human" or principal.session_id is None:
+            raise BrokerError(403, "FORBIDDEN", "this action needs a human token")
+        return self.record_answer(
+            principal.session_id, qid, answer, principal.actor, principal.party_key
         )
 
-    async def record_answer(
+    def record_answer(
         self, session_id: str, qid: str, answer: str, actor: str, party_key: str | None
     ) -> dict[str, Any]:
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, *NEGOTIATION_STATES, State.ESCALATED)
-                question = db.get(QuestionRecord, (session_id, qid))
-                if question is None:
-                    raise BrokerError(404, "NO_SUCH_QUESTION", f"question {qid} does not exist")
-                if party_key is not None and question.party_key != party_key:
-                    raise BrokerError(403, "FORBIDDEN", "this question belongs to the other party")
-                if question.answer is not None:
-                    raise BrokerError(409, "ALREADY_ANSWERED", f"{qid} is already answered")
-                asking = self.party(db, session_id, question.party_key)
-                contract = self.current_contract(db, record)
-                decision_id = contracts.human_decision_id(contract, qid)
-                decision = {
-                    "id": decision_id,
-                    "text": f"{question.text} Odpowiedź: {answer}",
-                    "owner": asking.role,
-                    "origin_question": qid,
-                }
-                self.store_version(
-                    db, record, contracts.add_decision(contract, decision), actor, outbox
-                )
-                question.answer = answer
-                question.answered_by = actor
-                question.decision_id = decision_id
-                db.add(question)
-                outbox.add(
-                    "question.answered",
-                    actor,
-                    {"qid": qid, "answer": answer, "decision_id": decision_id},
-                    question.party_key,
-                )
-                if State(record.state) is State.ESCALATED:
-                    self.apply_trigger(db, record, Trigger.HUMAN_ACTION, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, *NEGOTIATION_STATES, State.ESCALATED)
+            question = db.get(QuestionRecord, (session_id, qid))
+            if question is None:
+                raise BrokerError(404, "NO_SUCH_QUESTION", f"question {qid} does not exist")
+            if question.party_key != party_key:
+                raise BrokerError(403, "FORBIDDEN", "this question belongs to the other party")
+            if question.answer is not None:
+                raise BrokerError(409, "ALREADY_ANSWERED", f"{qid} is already answered")
+            asking = self.party(db, session_id, question.party_key)
+            contract = self.current_contract(db, record)
+            decision_id = contracts.human_decision_id(contract, qid)
+            decision = {
+                "id": decision_id,
+                "text": f"{question.text} Odpowiedź: {answer}",
+                "owner": asking.role,
+                "origin_question": qid,
+            }
+            self.store_version(
+                db, record, contracts.add_decision(contract, decision), actor, outbox
+            )
+            question.answer = answer
+            question.answered_by = actor
+            question.decision_id = decision_id
+            db.add(question)
+            outbox.add(
+                "question.answered",
+                actor,
+                {"qid": qid, "answer": answer, "decision_id": decision_id},
+                question.party_key,
+            )
+            if State(record.state) is State.ESCALATED:
+                self.apply_trigger(db, record, Trigger.HUMAN_ACTION, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return {"qid": qid, "decision_id": decision_id}
 
-    async def resume(
-        self, principal: Principal, session_id: str, extra_rounds: int
-    ) -> dict[str, Any]:
+    def resume(self, principal: Principal, session_id: str, extra_rounds: int) -> dict[str, Any]:
         self.authorize(principal, session_id, "human", "observer", "admin")
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, State.ESCALATED)
-                record.max_rounds = max(record.max_rounds, record.round) + extra_rounds
-                self.apply_trigger(db, record, Trigger.HUMAN_ACTION, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, State.ESCALATED)
+            record.max_rounds = max(record.max_rounds, record.round) + extra_rounds
+            self.apply_trigger(db, record, Trigger.HUMAN_ACTION, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return self.session_view(principal, session_id)
 
-    async def sign(self, principal: Principal, session_id: str, version: int) -> dict[str, Any]:
+    def sign(self, principal: Principal, session_id: str, version: int) -> dict[str, Any]:
         self.authorize(principal, session_id, "human")
-        return await self.record_signature(session_id, principal.party_key or "", version)
+        return self.record_signature(session_id, principal.party_key or "", version)
 
-    async def record_signature(
-        self, session_id: str, party_key: str, version: int
-    ) -> dict[str, Any]:
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, State.AWAITING_SIGNATURES)
-                if version != record.current_contract_version:
-                    raise BrokerError(
-                        409,
-                        "STALE_VERSION",
-                        f"sign the current version {record.current_contract_version}",
-                        {"current_version": record.current_contract_version},
+    def record_signature(self, session_id: str, party_key: str, version: int) -> dict[str, Any]:
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, State.AWAITING_SIGNATURES)
+            if version != record.current_contract_version:
+                raise BrokerError(
+                    409,
+                    "STALE_VERSION",
+                    f"sign the current version {record.current_contract_version}",
+                    {"current_version": record.current_contract_version},
+                )
+            party = self.party(db, session_id, party_key)
+            if db.get(SignatureRecord, (session_id, party.party_key, version)) is None:
+                db.add(
+                    SignatureRecord(
+                        session_id=session_id,
+                        party_key=party.party_key,
+                        version=version,
+                        signed_at=utc_now(),
                     )
-                party = self.party(db, session_id, party_key)
-                if db.get(SignatureRecord, (session_id, party.party_key, version)) is None:
-                    db.add(
-                        SignatureRecord(
-                            session_id=session_id,
-                            party_key=party.party_key,
-                            version=version,
-                            signed_at=utc_now(),
-                        )
-                    )
-                    party.status = "signed"
-                    db.add(party)
-                    outbox.add(
-                        "signature.added",
-                        f"human:{party.party_key}",
-                        {"party": party.party_key, "version": version},
-                    )
-                db.flush()
-                signatures = db.exec(
-                    select(SignatureRecord).where(
-                        SignatureRecord.session_id == session_id, SignatureRecord.version == version
-                    )
-                ).all()
-                if len({signature.party_key for signature in signatures}) == 2:
-                    self.apply_trigger(db, record, Trigger.BOTH_SIGNED, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+                )
+                party.status = "signed"
+                db.add(party)
+                outbox.add(
+                    "signature.added",
+                    f"human:{party.party_key}",
+                    {"party": party.party_key, "version": version},
+                )
+            db.flush()
+            signatures = db.exec(
+                select(SignatureRecord).where(
+                    SignatureRecord.session_id == session_id, SignatureRecord.version == version
+                )
+            ).all()
+            if len({signature.party_key for signature in signatures}) == 2:
+                self.apply_trigger(db, record, Trigger.BOTH_SIGNED, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return {"signed": True, "version": version}
 
-    async def submit_test_run(
+    def submit_test_run(
         self, principal: Principal, session_id: str, run: TestRunIn
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, State.IMPLEMENTING)
-                party = self.party(db, session_id, principal.party_key)
-                if run.side != party.role:
-                    raise BrokerError(422, "WRONG_SIDE", f"{party.party_key} is the {party.role}")
-                if run.contract_version != record.signed_contract_version:
-                    raise BrokerError(
-                        409,
-                        "STALE_VERSION",
-                        f"test the signed version {record.signed_contract_version}",
-                    )
-                preset = self.preset(record.preset)
-                self.guard(
-                    record,
-                    party.party_key,
-                    check_test_run(run.model_dump(exclude={"workspace_image"}), preset.allowlist()),
-                    outbox,
-                    db,
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, State.IMPLEMENTING)
+            party = self.party(db, session_id, principal.party_key)
+            if run.side != party.role:
+                raise BrokerError(422, "WRONG_SIDE", f"{party.party_key} is the {party.role}")
+            if run.contract_version != record.signed_contract_version:
+                raise BrokerError(
+                    409,
+                    "STALE_VERSION",
+                    f"test the signed version {record.signed_contract_version}",
                 )
-                if run.binding_yaml is not None:
-                    self.accept_binding(party, run.binding_yaml)
-                if run.workspace_image is not None:
-                    party.workspace_image = run.workspace_image
-                db.add(
-                    TestRunRecord(
-                        session_id=session_id,
-                        party_key=party.party_key,
-                        side=run.side,
-                        contract_version=run.contract_version,
-                        summary_json=json.dumps(run.summary),
-                        results_json=json.dumps([result.model_dump() for result in run.results]),
-                        created_at=utc_now(),
-                    )
+            preset = self.preset(record.preset)
+            self.guard(
+                record,
+                party.party_key,
+                check_test_run(run.model_dump(exclude={"workspace_image"}), preset.allowlist()),
+                outbox,
+                db,
+            )
+            if run.binding_yaml is not None:
+                self.accept_binding(party, run.binding_yaml)
+            if run.workspace_image is not None:
+                party.workspace_image = run.workspace_image
+            db.add(
+                TestRunRecord(
+                    session_id=session_id,
+                    party_key=party.party_key,
+                    side=run.side,
+                    contract_version=run.contract_version,
+                    summary_json=json.dumps(run.summary),
+                    results_json=json.dumps([result.model_dump() for result in run.results]),
+                    created_at=utc_now(),
                 )
-                contract = self.signed_contract(db, record)
-                required = {scenario.id for scenario in contract.scenarios_for(run.side)}
-                passed = {result.scenario_id for result in run.results if result.status == "passed"}
-                ready = required <= passed and party.binding_yaml is not None
-                party.status = "ready_for_e2e" if ready else "implementing"
-                db.add(party)
-                outbox.add(
-                    "tests.result",
-                    party.party_key,
-                    {
-                        "party": party.party_key,
-                        "side": run.side,
-                        "summary": run.summary,
-                        "results": [result.model_dump() for result in run.results],
-                    },
-                )
-                outbox.add(
-                    "party.status",
-                    "broker",
-                    {"party": party.party_key, "status": party.status},
-                )
-                db.flush()
-                if all(p.status == "ready_for_e2e" for p in self.roles(db, session_id).values()):
-                    self.apply_trigger(db, record, Trigger.BOTH_READY, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+            )
+            contract = load_contract_text(self.contract_text(db, session_id, run.contract_version))
+            required = {scenario.id for scenario in contract.scenarios_for(run.side)}
+            passed = {result.scenario_id for result in run.results if result.status == "passed"}
+            ready = required <= passed and party.binding_yaml is not None
+            party.status = "ready_for_e2e" if ready else "implementing"
+            db.add(party)
+            outbox.add(
+                "tests.result",
+                party.party_key,
+                {
+                    "party": party.party_key,
+                    "side": run.side,
+                    "summary": run.summary,
+                    "results": [result.model_dump() for result in run.results],
+                },
+            )
+            outbox.add(
+                "party.status",
+                "broker",
+                {"party": party.party_key, "status": party.status},
+            )
+            db.flush()
+            if all(p.status == "ready_for_e2e" for p in self.roles(db, session_id).values()):
+                self.apply_trigger(db, record, Trigger.BOTH_READY, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return {"ready_for_e2e": ready}
 
     def accept_binding(self, party: PartyRecord, binding_yaml: str) -> None:
@@ -1096,51 +1048,45 @@ class BrokerService:
             raise BrokerError(422, "INVALID_BINDING", f"the binding must have side {party.role}")
         party.binding_yaml = binding_yaml
 
-    def signed_contract(self, db: Session, record: SessionRecord) -> Contract:
-        if record.signed_contract_version is None:
-            raise BrokerError(409, "NOT_SIGNED", "the contract is not signed yet")
-        return load_contract_text(self.contract_text(db, record.id, record.signed_contract_version))
-
-    async def contract_gap(
+    def contract_gap(
         self, principal: Principal, session_id: str, gap: ContractGapIn
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                self.require_state(record, State.IMPLEMENTING)
-                party = self.party(db, session_id, principal.party_key)
-                preset = self.preset(record.preset)
-                self.guard(
-                    record,
-                    party.party_key,
-                    check_message(gap.model_dump(), preset.allowlist()),
-                    outbox,
-                    db,
-                )
-                outbox.add(
-                    "contract.gap",
-                    party.party_key,
-                    {"party": party.party_key, **gap.model_dump()},
-                )
-                self.apply_trigger(db, record, Trigger.CONTRACT_GAP, outbox)
-                record.turn_party = party.party_key
-                for member in self.roles(db, session_id).values():
-                    member.status = "amending"
-                    member.last_turn_status = None
-                    member.last_accepted_version = None
-                    db.add(member)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            self.require_state(record, State.IMPLEMENTING)
+            party = self.party(db, session_id, principal.party_key)
+            preset = self.preset(record.preset)
+            self.guard(
+                record,
+                party.party_key,
+                check_message(gap.model_dump(), preset.allowlist()),
+                outbox,
+                db,
+            )
+            outbox.add(
+                "contract.gap",
+                party.party_key,
+                {"party": party.party_key, **gap.model_dump()},
+            )
+            self.apply_trigger(db, record, Trigger.CONTRACT_GAP, outbox)
+            record.turn_party = party.party_key
+            for member in self.roles(db, session_id).values():
+                member.status = "amending"
+                member.last_turn_status = None
+                member.last_accepted_version = None
+                db.add(member)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
         return {"state": State.AMENDING.value}
 
     def e2e_request(self, session_id: str) -> E2ERequest:
         with open_session(self.engine) as db:
             record = self.session_record(db, session_id)
             roles = self.roles(db, session_id)
-            version = record.signed_contract_version or record.current_contract_version
+            version = record.current_contract_version
             contract_yaml = self.contract_text(db, session_id, version)
         consumer, provider = roles["consumer"], roles["provider"]
         if consumer.binding_yaml is None or provider.binding_yaml is None:
@@ -1148,7 +1094,7 @@ class BrokerService:
         return E2ERequest(
             session_id=session_id,
             contract_yaml=contract_yaml,
-            contract_id=contracts.load_yaml(contract_yaml)["id"],
+            contract_id=parse_yaml(contract_yaml)["id"],
             contract_version=version,
             consumer_party=consumer.party_key,
             provider_party=provider.party_key,
@@ -1166,7 +1112,7 @@ class BrokerService:
             },
         )
 
-    async def trigger_e2e(self, principal: Principal, session_id: str) -> dict[str, Any]:
+    def trigger_e2e(self, principal: Principal, session_id: str) -> dict[str, Any]:
         self.authorize(principal, session_id, "observer", "admin")
         with open_session(self.engine) as db:
             self.require_state(self.session_record(db, session_id), State.E2E)
@@ -1183,47 +1129,42 @@ class BrokerService:
         except Exception as error:
             logger.exception("end-to-end run failed for %s", session_id)
             failure = {"scenario": "E2E", "message": f"{type(error).__name__}: {error}"}
-            await self.finish_e2e(session_id, None, failure)
+            self.finish_e2e(session_id, None, failure)
             return
         finally:
             self.gateway.revoke(session_id)
-        await self.finish_e2e(session_id, report, None)
+        self.finish_e2e(session_id, report, None)
 
-    async def finish_e2e(
+    def finish_e2e(
         self, session_id: str, report: RunReport | None, failure: dict[str, Any] | None
     ) -> None:
-        async with self.locks[session_id]:
-            outbox = Outbox()
-            with open_session(self.engine) as db:
-                record = self.session_record(db, session_id)
-                if State(record.state) is not State.E2E:
-                    return
-                sanitized = (
-                    report.to_dict(include_logs=False) if report is not None else failure or {}
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            if State(record.state) is not State.E2E:
+                return
+            sanitized = report.to_dict(include_logs=False) if report is not None else failure or {}
+            passed = report is not None and report.ok and bool(report.scenarios)
+            db.add(
+                TestRunRecord(
+                    session_id=session_id,
+                    party_key="broker",
+                    side="e2e",
+                    contract_version=record.current_contract_version,
+                    summary_json=json.dumps(report.summary if report else {"error": 1}),
+                    results_json=json.dumps(sanitized, ensure_ascii=False, default=str),
+                    created_at=utc_now(),
                 )
-                passed = report is not None and report.ok and bool(report.scenarios)
-                db.add(
-                    TestRunRecord(
-                        session_id=session_id,
-                        party_key="broker",
-                        side="e2e",
-                        contract_version=record.signed_contract_version or 0,
-                        summary_json=json.dumps(report.summary if report else {"error": 1}),
-                        results_json=json.dumps(sanitized, ensure_ascii=False, default=str),
-                        created_at=utc_now(),
-                    )
-                )
-                outbox.add("e2e.result", "broker", {"passed": passed, "report": sanitized})
-                if passed:
-                    self.apply_trigger(db, record, Trigger.E2E_PASSED, outbox)
-                else:
-                    record.e2e_feedback_json = json.dumps(
-                        sanitized, ensure_ascii=False, default=str
-                    )
-                    self.apply_trigger(db, record, Trigger.E2E_FAILED, outbox)
-                db.add(record)
-                db.commit()
-            self.flush(session_id, outbox)
+            )
+            outbox.add("e2e.result", "broker", {"passed": passed, "report": sanitized})
+            if passed:
+                self.apply_trigger(db, record, Trigger.E2E_PASSED, outbox)
+            else:
+                record.e2e_feedback_json = json.dumps(sanitized, ensure_ascii=False, default=str)
+                self.apply_trigger(db, record, Trigger.E2E_FAILED, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
 
     async def autopilot_answer(self, session_id: str, qid: str) -> None:
         async with self.autopilot_locks[session_id]:
@@ -1244,7 +1185,7 @@ class BrokerService:
                 role,
             )
             try:
-                await self.record_answer(
+                self.record_answer(
                     session_id, qid, answer, f"human:{question.party_key}", question.party_key
                 )
             except BrokerError as error:
@@ -1258,7 +1199,7 @@ class BrokerService:
             party_keys = [party.party_key for party in self.roles(db, session_id).values()]
         for party_key in party_keys:
             try:
-                await self.record_signature(session_id, party_key, version)
+                self.record_signature(session_id, party_key, version)
             except BrokerError as error:
                 logger.warning("autopilot could not sign for %s: %s", party_key, error.message)
 
@@ -1307,7 +1248,7 @@ class BrokerService:
                 for side, run in latest.items()
             },
             "audit": self.events.verify(session_id).to_dict(),
-            "metrics": self.metrics(record),
+            "metrics": json.loads(record.metrics_json),
         }
 
     def gateway_allowlist(self, session_id: str, party_key: str) -> Allowlist | None:
@@ -1321,28 +1262,11 @@ class BrokerService:
             if party is None:
                 return None
             contract_yaml = self.contract_text(db, session_id, record.signed_contract_version)
-            binding_yaml = party.binding_yaml
-        try:
-            contract = load_contract_text(contract_yaml)
-            binding = load_binding_text(binding_yaml) if binding_yaml else None
-        except ContractLoadError:
-            return None
-        return build_allowlist(contract, binding, party.role)
+        binding = load_binding_text(party.binding_yaml) if party.binding_yaml else None
+        return build_allowlist(load_contract_text(contract_yaml), binding, party.role)
 
     def gateway_event(self, session_id: str, payload: dict[str, Any]) -> None:
         self.events.append(session_id, "gateway.request", "broker", payload)
-        self.notify(session_id)
-
-    def issue_relay_tokens(self, principal: Principal, session_id: str) -> dict[str, str]:
-        self.authorize(principal, session_id, "observer", "admin")
-        with open_session(self.engine) as db:
-            record = self.session_record(db, session_id)
-            if record.signed_contract_version is None:
-                raise BrokerError(
-                    409, "NOT_SIGNED", "the gateway opens after the contract is signed"
-                )
-            parties = [party.party_key for party in self.roles(db, session_id).values()]
-        return {party: self.gateway.issue_token(session_id, party) for party in parties}
 
     async def gateway_probe(self, session_id: str, party_key: str) -> ProbeResult:
         name = f"gateway request to {party_key} outside the contract"

@@ -1,26 +1,26 @@
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
+
+
+def header_value(headers: Mapping[str, str], name: str) -> str | None:
+    lowered = name.lower()
+    for key, value in headers.items():
+        if key.lower() == lowered:
+            return value
+    return None
 
 
 @dataclass(frozen=True)
 class IncomingRequest:
     method: str
     path: str
-    query: dict[str, list[str]]
     headers: dict[str, str]
     body: bytes
-
-    def header(self, name: str) -> str | None:
-        lowered = name.lower()
-        for key, value in self.headers.items():
-            if key.lower() == lowered:
-                return value
-        return None
 
 
 @dataclass(frozen=True)
@@ -45,11 +45,9 @@ def handler_class(handle: RequestHandler) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         def respond(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
-            parts = urlsplit(self.path)
             request = IncomingRequest(
                 method=self.command,
-                path=parts.path,
-                query=parse_qs(parts.query),
+                path=urlsplit(self.path).path,
                 headers={key: value for key, value in self.headers.items()},
                 body=self.rfile.read(length) if length else b"",
             )
@@ -80,8 +78,8 @@ def handler_class(handle: RequestHandler) -> type[BaseHTTPRequestHandler]:
 
 
 class BackgroundServer:
-    def __init__(self, handle: RequestHandler, host: str = "127.0.0.1", port: int = 0) -> None:
-        self.server = ThreadingHTTPServer((host, port), handler_class(handle))
+    def __init__(self, handle: RequestHandler, port: int = 0) -> None:
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), handler_class(handle))
         self.server.daemon_threads = True
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 

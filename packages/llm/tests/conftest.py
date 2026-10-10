@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from llm_helpers import ROOT, ClientFactory, FakeTokenFactory, capability_report
+from llm_helpers import ClientFactory, FakeTokenFactory, capability_report
 
 from doubleblind_llm.budget import Ledger
 from doubleblind_llm.capabilities import CapabilityReport
@@ -12,7 +12,7 @@ from doubleblind_llm.settings import LLMSettings, Mode, load_settings
 
 @pytest.fixture
 def settings() -> LLMSettings:
-    return load_settings(ROOT / "config")
+    return load_settings()
 
 
 @pytest.fixture

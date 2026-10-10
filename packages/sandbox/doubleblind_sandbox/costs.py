@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from pathlib import Path
 
 from doubleblind_llm.budget import (
@@ -11,8 +10,6 @@ from doubleblind_llm.budget import (
 
 SANDBOX_MODEL = "token-factory-sandboxes"
 MINIMUM_RESERVE_USD = 0.25
-
-CostListener = Callable[[str, float, str], None]
 
 
 class LedgerCosts:

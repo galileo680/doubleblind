@@ -8,8 +8,6 @@ ThinkingToggle = Literal["chat_template_kwargs", "system_prompt", "none"]
 
 class ThinkingCapability(BaseModel):
     toggle: ThinkingToggle = "chat_template_kwargs"
-    reasoning_fields: list[str] = Field(default_factory=lambda: ["reasoning_content", "reasoning"])
-    reasoning_budget_param: bool = True
 
 
 class ModelCapabilities(BaseModel):
@@ -27,13 +25,6 @@ class CapabilityReport(BaseModel):
     generated_at: str
     base_url: str
     models: dict[str, ModelCapabilities]
-
-    def for_alias(self, alias: str, model_id: str) -> ModelCapabilities:
-        return self.models.get(alias) or ModelCapabilities(alias=alias, id=model_id)
-
-
-def default_capabilities(alias: str, model_id: str) -> ModelCapabilities:
-    return ModelCapabilities(alias=alias, id=model_id)
 
 
 def load_capabilities(path: Path) -> CapabilityReport | None:

@@ -72,7 +72,7 @@ async def test_local_service_runs_until_stopped(tmp_path: Path) -> None:
 
     assert process.poll() is not None
     assert not version.exists()
-    assert await sandbox.stop_service(handle) == 0.0
+    await sandbox.stop_service(handle)
     await sandbox.aclose()
 
 

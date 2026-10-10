@@ -1,4 +1,3 @@
-import json
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -13,19 +12,13 @@ from doubleblind_broker.db import build_engine
 from doubleblind_broker.e2e import E2EExecutor, SandboxGatewayE2E, UnavailableE2E
 from doubleblind_broker.gateway import GatewayError
 from doubleblind_broker.service import BrokerError, BrokerService, BrokerSettings, IsolationProbe
-from doubleblind_sandbox.costs import LedgerCosts
-from doubleblind_sandbox.docker import DockerSandboxProvider
+from doubleblind_sandbox.environment import gateway_url, recorded_bases, remote_sandbox
 from doubleblind_sandbox.isolation_probe import SandboxIsolationProbe
 from doubleblind_sandbox.provider import ServiceSandbox
-from doubleblind_sandbox.tokenfactory import TokenFactorySandboxProvider
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATABASE = REPO_ROOT / "volumes" / "broker.db"
 DASHBOARD_DIST = REPO_ROOT / "dashboard" / "dist"
-BASE_IMAGES = {
-    "tokenfactory": REPO_ROOT / "volumes" / "base-images.json",
-    "docker": REPO_ROOT / "volumes" / "base-images.docker.json",
-}
 
 
 def settings_from_env() -> BrokerSettings:
@@ -52,56 +45,36 @@ def sandbox_kind() -> str:
 
 def sandbox_from_env() -> Callable[[], ServiceSandbox] | None:
     kind = sandbox_kind()
-    if kind == "docker":
-        return DockerSandboxProvider
-    if kind == "tokenfactory" and os.environ.get("NEBIUS_API_KEY"):
-        return lambda: TokenFactorySandboxProvider.from_env(LedgerCosts.from_env(REPO_ROOT))
-    return None
-
-
-def gateway_url_from_env() -> str | None:
-    public = os.environ.get("BROKER_PUBLIC_URL")
-    if public:
-        return public
-    if sandbox_kind() == "docker":
-        return f"http://host.docker.internal:{os.environ.get('BROKER_PORT', '8000')}"
+    if kind == "docker" or (kind == "tokenfactory" and os.environ.get("NEBIUS_API_KEY")):
+        return remote_sandbox(kind)
     return None
 
 
 def e2e_executor_from_env() -> E2EExecutor:
-    factory, url = sandbox_from_env(), gateway_url_from_env()
+    factory = sandbox_from_env()
+    url = gateway_url(sandbox_kind(), os.environ.get("BROKER_PORT", "8000"))
     if factory is None or url is None:
         return UnavailableE2E()
     return SandboxGatewayE2E(factory, url)
 
 
 def isolation_probe_from_env() -> IsolationProbe | None:
-    factory = sandbox_from_env()
-    images = BASE_IMAGES.get(sandbox_kind())
-    if factory is None or images is None or not images.is_file():
+    factory, bases = sandbox_from_env(), recorded_bases(sandbox_kind())
+    if factory is None or bases is None:
         return None
-    tags: dict[str, str] = json.loads(images.read_text(encoding="utf-8"))
-    return SandboxIsolationProbe(factory, {party: f"tag:{tag}" for party, tag in tags.items()})
+    return SandboxIsolationProbe(factory, bases)
 
 
-def create_app(
-    service: BrokerService | None = None,
-    database_url: str | None = None,
-    settings: BrokerSettings | None = None,
-    e2e_executor: E2EExecutor | None = None,
-    simulator: HumanSimulator | None = None,
-) -> FastAPI:
+def create_app(service: BrokerService | None = None) -> FastAPI:
     if service is None:
-        url = database_url or os.environ.get(
-            "DOUBLEBLIND_BROKER_DB", f"sqlite:///{DEFAULT_DATABASE.as_posix()}"
-        )
-        if url.startswith("sqlite:///") and url not in ("sqlite:///:memory:",):
+        url = os.environ.get("DOUBLEBLIND_BROKER_DB", f"sqlite:///{DEFAULT_DATABASE.as_posix()}")
+        if url.startswith("sqlite:///") and url != "sqlite:///:memory:":
             Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
         service = BrokerService(
             build_engine(url),
-            settings or settings_from_env(),
-            e2e_executor or e2e_executor_from_env(),
-            simulator or simulator_from_env(),
+            settings_from_env(),
+            e2e_executor_from_env(),
+            simulator_from_env(),
             isolation_probe_from_env(),
         )
     app = FastAPI(title="DoubleBlind broker", version="0.1.0")

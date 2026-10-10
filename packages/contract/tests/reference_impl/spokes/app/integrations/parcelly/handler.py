@@ -1,15 +1,8 @@
 import logging
 
-import httpx
-
 from app.db import SessionLocal
 from app.integrations.parcelly.address import parse_address
-from app.integrations.parcelly.client import (
-    CreatedShipment,
-    ParcellyNotConfiguredError,
-    ParcellyRejectedError,
-    create_shipment,
-)
+from app.integrations.parcelly.client import ParcellyRejectedError, create_shipment
 from app.integrations.parcelly.mapping import build_request, normalize_phone
 from app.models import Order, OrderStatus
 from app.services.order_events import ORDER_PAID_HANDLERS
@@ -26,12 +19,12 @@ def mark_for_review(order_id: str, reason: str) -> None:
             session.commit()
 
 
-def save_shipment(order_id: str, shipment: CreatedShipment) -> None:
+def save_shipment(order_id: str, shipment_id: str, tracking_number: str) -> None:
     with SessionLocal() as session:
         order = session.get(Order, order_id)
         if order is not None:
-            order.shipment_id = shipment.id
-            order.tracking_number = shipment.tracking_number
+            order.shipment_id = shipment_id
+            order.tracking_number = tracking_number
             session.commit()
 
 
@@ -48,19 +41,12 @@ def ship_paid_order(order: Order) -> None:
         return
     path, payload = build_request(order, address, phone)
     try:
-        shipment = create_shipment(path, payload, idempotency_key=order.id)
-    except ParcellyNotConfiguredError as error:
-        logger.warning("Parcelly integration is not configured: %s", error)
-        return
+        shipment_id, tracking_number = create_shipment(path, payload, idempotency_key=order.id)
     except ParcellyRejectedError as error:
         mark_for_review(order.id, str(error))
         return
-    except httpx.HTTPError as error:
-        logger.warning("Parcelly is unavailable, order %s stays paid: %s", order.id, error)
-        return
-    save_shipment(order.id, shipment)
+    save_shipment(order.id, shipment_id, tracking_number)
 
 
 def register_handler() -> None:
-    if ship_paid_order not in ORDER_PAID_HANDLERS:
-        ORDER_PAID_HANDLERS.append(ship_paid_order)
+    ORDER_PAID_HANDLERS.append(ship_paid_order)

@@ -5,12 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from sandbox_party import (
-    SandboxKind,
-    base_heads,
-    sandbox_cost_usd,
-    sandbox_factory,
-)
+from sandbox_party import SandboxKind, base_heads, sandbox_cost_usd, sandbox_factory
 from scripted_session import run_quick_session
 
 from doubleblind_sandbox.isolation_probe import SandboxIsolationProbe
@@ -31,8 +26,8 @@ def main() -> None:
     parser.add_argument("--sandbox", choices=["tokenfactory", "local"], default="tokenfactory")
     arguments = parser.parse_args()
     kind: SandboxKind = arguments.sandbox
-    factory = sandbox_factory(kind, Path(tempfile.mkdtemp(prefix="doubleblind-probe-")))
-    probe = SandboxIsolationProbe(factory, base_heads(kind, factory))
+    root = Path(tempfile.mkdtemp(prefix="doubleblind-probe-"))
+    probe = SandboxIsolationProbe(sandbox_factory(kind, root), base_heads(kind, root))
     collected: dict[str, Any] = {}
 
     def run_probe(client: httpx.Client, session_id: str) -> None:
@@ -44,9 +39,8 @@ def main() -> None:
     try:
         outcome = run_quick_session(isolation_probe=probe, after=run_probe)
     finally:
-        provider = factory()
-        if isinstance(provider, LocalSandboxProvider):
-            provider.remove_all()
+        if kind == "local":
+            LocalSandboxProvider(root).remove_all()
     print(f"session state: {outcome.state}")
     print_results(collected)
     print(f"sandbox cost of the probes: ${sandbox_cost_usd() - cost_before:.4f}")

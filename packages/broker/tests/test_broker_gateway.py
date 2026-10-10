@@ -13,12 +13,11 @@ from broker_helpers import PRESETS_DIR, REFERENCE, run_payload
 from scripted_party import BRIEFS, reference_binding, round_one, round_two
 from scripted_session import running_broker
 
-from doubleblind_broker.contracts import load_yaml
 from doubleblind_broker.db import build_engine
 from doubleblind_broker.gateway import build_allowlist, path_regex, url_path
 from doubleblind_broker.service import BrokerService, BrokerSettings
 from doubleblind_contract.http_server import BackgroundServer, IncomingRequest, OutgoingResponse
-from doubleblind_contract.loader import load_binding_text, load_contract_text
+from doubleblind_contract.loader import load_binding_text, load_contract_text, parse_yaml
 from doubleblind_contract.models import Binding
 
 SHIPMENT_REQUEST = {
@@ -137,15 +136,18 @@ def signed_session(client: httpx.Client) -> Session:
     session.post("/start", "observer")
     session.post("/briefs", "agent_spokes", BRIEFS["spokes"])
     session.post("/briefs", "agent_parcelly", BRIEFS["parcelly"])
-    session.turn("agent_parcelly", round_one(load_yaml(session.get("/contract")), REFERENCE))
-    session.turn("agent_spokes", round_two(load_yaml(session.get("/contract")), REFERENCE))
+    session.turn("agent_parcelly", round_one(parse_yaml(session.get("/contract")), REFERENCE))
+    session.turn("agent_spokes", round_two(parse_yaml(session.get("/contract")), REFERENCE))
     session.turn("agent_parcelly", [], "ready_to_sign")
     session.turn("agent_spokes", [], "ready_to_sign")
     session.post("/signatures", "human_spokes", {"version": 3})
     session.post("/signatures", "human_parcelly", {"version": 3})
-    contract = load_yaml(session.get("/contract"))
+    contract = parse_yaml(session.get("/contract"))
     session.post("/test-runs", "agent_spokes", run_payload(contract, "consumer"))
     session.post("/test-runs", "agent_parcelly", run_payload(contract, "provider"))
+    deadline = time.monotonic() + 10
+    while session.get("")["state"] == "E2E" and time.monotonic() < deadline:
+        time.sleep(0.05)
     return session
 
 
@@ -201,7 +203,9 @@ def test_gateway_relays_contract_traffic_through_relay_clients() -> None:
     ):
         session = signed_session(client)
         sid = session.session_id
-        tokens = session.post("/relay-tokens", "observer")
+        tokens = {
+            party: service.gateway.issue_token(sid, party) for party in ("parcelly", "spokes")
+        }
         with (
             relay(broker_url, sid, "parcelly", tokens["parcelly"], courier.url),
             relay(broker_url, sid, "spokes", tokens["spokes"], shop.url),
@@ -250,10 +254,6 @@ def test_gateway_answers_504_without_a_relay_and_403_before_signing() -> None:
     with running_broker(service) as broker_url, httpx.Client(base_url=broker_url) as client:
         unsigned = client.post("/api/v1/sessions", json={"name": "x", "preset": "spokes-parcelly"})
         early = client.post(f"/gw/{unsigned.json()['session_id']}/parcelly/v1/shipments", json={})
-        early_tokens = client.post(
-            f"/api/v1/sessions/{unsigned.json()['session_id']}/relay-tokens",
-            headers={"Authorization": f"Bearer {unsigned.json()['tokens']['observer']}"},
-        )
         session = signed_session(client)
         silent = client.post(
             f"/gw/{session.session_id}/parcelly/v1/shipments", json=SHIPMENT_REQUEST
@@ -262,11 +262,10 @@ def test_gateway_answers_504_without_a_relay_and_403_before_signing() -> None:
         idle = client.get(
             f"/relay/{session.session_id}/parcelly/next",
             params={"wait": 0.2},
-            headers={"X-Relay-Token": session.post("/relay-tokens", "observer")["parcelly"]},
+            headers={"X-Relay-Token": service.gateway.issue_token(session.session_id, "parcelly")},
         )
 
     assert early.status_code == 403
-    assert early_tokens.status_code == 409
     assert silent.status_code == 504
     assert silent.json()["code"] == "RELAY_TIMEOUT"
     assert idle.status_code == 204

@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -9,10 +10,8 @@ import typer
 from doubleblind_contract.loader import ContractLoadError, load_binding, load_contract
 from doubleblind_contract.models import Binding
 from doubleblind_contract.report import render_console, write_json, write_junit
-from doubleblind_contract.runner_consumer import run_consumer_tests
-from doubleblind_contract.runner_e2e import run_e2e_tests
-from doubleblind_contract.runner_provider import run_provider_tests
-from doubleblind_contract.runtime import ConfigurationError, RunReport, load_secrets, runner_env
+from doubleblind_contract.runner import run_consumer_tests, run_e2e_tests, run_provider_tests
+from doubleblind_contract.runtime import ConfigurationError, RunReport, load_secrets, read_env_file
 from doubleblind_contract.stub_server import ProviderStub
 from doubleblind_contract.validate import (
     RULE_BINDING,
@@ -34,9 +33,6 @@ ScenariosOption = Annotated[
 ]
 ReportOption = Annotated[Path | None, typer.Option("--report", help="Write the JSON report here")]
 JunitOption = Annotated[Path | None, typer.Option("--junit", help="Write a JUnit XML report here")]
-EnvFileOption = Annotated[
-    list[Path] | None, typer.Option("--env-file", help="KEY=VALUE file added to the environment")
-]
 
 
 @app.callback()
@@ -126,11 +122,9 @@ def test_consumer(
     scenarios: ScenariosOption = None,
     report: ReportOption = None,
     junit: JunitOption = None,
-    env_file: EnvFileOption = None,
 ) -> None:
-    env = runner_env(env_file or [])
     execute(
-        lambda: run_consumer_tests(contract, binding, parse_scenarios(scenarios), env),
+        lambda: run_consumer_tests(contract, binding, parse_scenarios(scenarios), env=os.environ),
         report,
         junit,
     )
@@ -143,11 +137,9 @@ def test_provider(
     scenarios: ScenariosOption = None,
     report: ReportOption = None,
     junit: JunitOption = None,
-    env_file: EnvFileOption = None,
 ) -> None:
-    env = runner_env(env_file or [])
     execute(
-        lambda: run_provider_tests(contract, binding, parse_scenarios(scenarios), env),
+        lambda: run_provider_tests(contract, binding, parse_scenarios(scenarios), env=os.environ),
         report,
         junit,
     )
@@ -164,17 +156,15 @@ def e2e(
     scenarios: ScenariosOption = None,
     report: ReportOption = None,
     junit: JunitOption = None,
-    env_file: EnvFileOption = None,
 ) -> None:
-    env = runner_env(env_file or [])
     execute(
         lambda: run_e2e_tests(
             contract,
             consumer_binding,
             provider_binding,
             parse_scenarios(scenarios),
-            env,
-            start_apps,
+            env=os.environ,
+            start_apps=start_apps,
         ),
         report,
         junit,
@@ -188,10 +178,14 @@ def stub(
     binding: Annotated[
         Path | None, typer.Option("--binding", "-b", help="Consumer binding (for webhooks)")
     ] = None,
-    env_file: EnvFileOption = None,
+    secrets_env_file: Annotated[
+        Path | None, typer.Option("--secrets-env-file", help="KEY=VALUE file with secrets")
+    ] = None,
 ) -> None:
-    env = runner_env(env_file or [])
+    env = dict(os.environ)
     try:
+        if secrets_env_file is not None:
+            env.update(read_env_file(secrets_env_file))
         loaded = load_contract(contract)
         secrets = load_secrets(loaded, env)
         receiver = load_binding(binding, env=env).webhook_receiver_url if binding else None

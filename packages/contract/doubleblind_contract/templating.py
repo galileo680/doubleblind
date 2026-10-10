@@ -10,25 +10,15 @@ TEMPLATE = re.compile(r"\{\{\s*(" + EXPRESSION + r")\s*\}\}")
 ROOT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 SEGMENT = re.compile(r"\.([A-Za-z0-9_-]+)|\[(\d+)\]")
 
-TemplateFunction = Callable[[], Any]
-
 
 class TemplateError(Exception):
     def __init__(self, expression: str, reason: str) -> None:
         super().__init__(f"{{{{{expression}}}}}: {reason}")
         self.expression = expression
-        self.reason = reason
 
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def new_uuid() -> str:
-    return str(uuid.uuid4())
-
-
-DEFAULT_FUNCTIONS: Mapping[str, TemplateFunction] = {"now": utc_now, "uuid": new_uuid}
 
 
 def parse_expression(expression: str) -> tuple[str, list[str | int]]:
@@ -48,10 +38,6 @@ def expression_root(expression: str) -> str:
 
 def is_whole_template(text: str) -> bool:
     return TEMPLATE.fullmatch(text) is not None
-
-
-def contains_template(text: str) -> bool:
-    return TEMPLATE.search(text) is not None
 
 
 def template_expressions(value: Any) -> list[str]:
@@ -87,46 +73,31 @@ def step_into(value: Any, part: str | int, expression: str, walked: str) -> Any:
     raise TemplateError(expression, f"'{walked}' has no field '{part}'")
 
 
-class Renderer:
-    def __init__(
-        self, variables: Mapping[str, Any], functions: Mapping[str, TemplateFunction]
-    ) -> None:
-        self.variables = variables
-        self.functions = functions
-        self.computed: dict[str, Any] = {}
-
-    def lookup(self, expression: str) -> Any:
-        root, parts = parse_expression(expression)
-        if root in self.variables:
-            value = self.variables[root]
-        elif not parts and root in self.functions:
-            if root not in self.computed:
-                self.computed[root] = self.functions[root]()
-            return self.computed[root]
-        else:
-            raise TemplateError(expression, f"unknown variable '{root}'")
-        walked = root
-        for part in parts:
-            value = step_into(value, part, expression, walked)
-            walked += f"[{part}]" if isinstance(part, int) else f".{part}"
-        return value
-
-    def render(self, value: Any) -> Any:
-        if isinstance(value, str):
-            whole = TEMPLATE.fullmatch(value)
-            if whole is not None:
-                return self.lookup(whole.group(1))
-            return replace_templates(value, lambda expression: as_text(self.lookup(expression)))
-        if isinstance(value, Mapping):
-            return {key: self.render(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [self.render(item) for item in value]
-        return value
+def lookup(expression: str, variables: Mapping[str, Any]) -> Any:
+    root, parts = parse_expression(expression)
+    if root in variables:
+        value = variables[root]
+    elif expression == "now":
+        return utc_now()
+    elif expression == "uuid":
+        return str(uuid.uuid4())
+    else:
+        raise TemplateError(expression, f"unknown variable '{root}'")
+    walked = root
+    for part in parts:
+        value = step_into(value, part, expression, walked)
+        walked += f"[{part}]" if isinstance(part, int) else f".{part}"
+    return value
 
 
-def render(
-    value: Any,
-    variables: Mapping[str, Any],
-    functions: Mapping[str, TemplateFunction] | None = None,
-) -> Any:
-    return Renderer(variables, {**DEFAULT_FUNCTIONS, **(functions or {})}).render(value)
+def render(value: Any, variables: Mapping[str, Any]) -> Any:
+    if isinstance(value, str):
+        whole = TEMPLATE.fullmatch(value)
+        if whole is not None:
+            return lookup(whole.group(1), variables)
+        return replace_templates(value, lambda expression: as_text(lookup(expression, variables)))
+    if isinstance(value, Mapping):
+        return {key: render(item, variables) for key, item in value.items()}
+    if isinstance(value, list):
+        return [render(item, variables) for item in value]
+    return value

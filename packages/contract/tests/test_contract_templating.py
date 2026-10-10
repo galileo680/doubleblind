@@ -4,7 +4,6 @@ import pytest
 
 from doubleblind_contract.templating import (
     TemplateError,
-    contains_template,
     expression_root,
     is_whole_template,
     parse_expression,
@@ -79,18 +78,6 @@ def test_now_and_uuid_are_generated() -> None:
     )
 
 
-def test_a_function_gives_the_same_value_within_one_render() -> None:
-    calls: list[int] = []
-
-    def counter() -> int:
-        calls.append(1)
-        return len(calls)
-
-    rendered = render({"a": "{{tick}}", "b": "{{tick}}"}, {}, functions={"tick": counter})
-
-    assert rendered == {"a": 1, "b": 1}
-
-
 def test_variables_take_precedence_over_functions() -> None:
     assert render("{{now}}", {"now": "fixed"}) == "fixed"
 
@@ -125,8 +112,6 @@ def test_field_of_a_scalar_is_an_error() -> None:
 def test_template_detection_helpers() -> None:
     assert is_whole_template("{{ctx.order_id}}")
     assert not is_whole_template("x{{ctx.order_id}}")
-    assert contains_template("x{{ctx.order_id}}")
-    assert not contains_template("x{ctx.order_id}")
     assert expression_root("request.body.reference") == "request"
     assert parse_expression("ctx.items[0].sku") == ("ctx", ["items", 0, "sku"])
 

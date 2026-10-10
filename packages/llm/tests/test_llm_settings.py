@@ -9,7 +9,9 @@ from doubleblind_llm.settings import LLMSettings, load_dotenv, load_settings, mo
 
 def test_settings_resolve_roles_to_models(settings: LLMSettings) -> None:
     assert settings.base_url == "https://api.tokenfactory.nebius.com/v1/"
-    assert settings.model_for_role("negotiator").id == "nvidia/Nemotron-3-Ultra-550b-a55b"
+    assert settings.model(settings.role("negotiator").model).id == (
+        "nvidia/Nemotron-3-Ultra-550b-a55b"
+    )
     assert settings.price_for("nvidia/nemotron-3-super-120b-a12b").output_per_m == 0.9
 
 

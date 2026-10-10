@@ -12,9 +12,7 @@ from doubleblind_contract.binding import AppStartError, ManagedApp, resolve_comm
 from doubleblind_contract.cli import app
 from doubleblind_contract.models import AppSpec
 from doubleblind_contract.report import render_console, write_json, write_junit
-from doubleblind_contract.runner_consumer import run_consumer_tests
-from doubleblind_contract.runner_e2e import run_e2e_tests
-from doubleblind_contract.runner_provider import run_provider_tests
+from doubleblind_contract.runner import run_consumer_tests, run_e2e_tests, run_provider_tests
 from doubleblind_contract.runtime import (
     ConfigurationError,
     Failure,
@@ -22,7 +20,6 @@ from doubleblind_contract.runtime import (
     ScenarioResult,
     free_port,
     read_env_file,
-    runner_env,
 )
 
 ENV = {
@@ -151,7 +148,7 @@ def test_cli_reports_configuration_errors_with_exit_code_two() -> None:
     assert "configuration error" in result.output
 
 
-def test_env_file_values_are_added(tmp_path: Path) -> None:
+def test_env_file_values_are_read(tmp_path: Path) -> None:
     env_file = tmp_path / "test.env"
     env_file.write_text(
         '# secrets for tests\nDOUBLEBLIND_SECRET_X="abc"\n\nPLAIN=value\nbroken line\n',
@@ -159,7 +156,6 @@ def test_env_file_values_are_added(tmp_path: Path) -> None:
     )
 
     assert read_env_file(env_file) == {"DOUBLEBLIND_SECRET_X": "abc", "PLAIN": "value"}
-    assert runner_env([env_file])["PLAIN"] == "value"
 
 
 def python_app(tmp_path: Path, start: str, healthcheck: bool = True) -> ManagedApp:
@@ -217,8 +213,6 @@ def test_missing_start_command_is_an_error(tmp_path: Path) -> None:
     spec = AppSpec.model_validate({"manage": False})
     managed = ManagedApp("demo", spec, "http://127.0.0.1:1", tmp_path, {}, tmp_path)
 
-    with pytest.raises(AppStartError, match="no start command"):
-        managed.start({})
     with pytest.raises(AppStartError, match="empty"):
         resolve_command("   ", {})
     assert managed.log_tail() == ""

@@ -20,7 +20,6 @@ class FakeSandboxApi:
         self.cost = 0.0012
         self.status = "SUCCESS"
         self.pending_polls = 1
-        self.import_status = "SUCCESS"
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -43,13 +42,6 @@ class FakeSandboxApi:
             self.instances.append(body)
             operation = f"op-{len(self.instances)}"
             self.operations[operation] = body
-            return httpx.Response(200, json={"uuid": operation})
-        if path == "/v1/images/import":
-            body = json.loads(request.content)
-            operation = f"import-{len(self.operations) + 1}"
-            self.operations[operation] = {"import": body}
-            if self.import_status == "SUCCESS":
-                self.tags[body["tag"]] = "image-imported"
             return httpx.Response(200, json={"uuid": operation})
         if path.startswith("/v1/operations/"):
             operation = path.removeprefix("/v1/operations/")
@@ -81,8 +73,6 @@ class FakeSandboxApi:
         self.polls[operation] = self.polls.get(operation, 0) + 1
         if self.polls[operation] <= self.pending_polls:
             return {"status": "EXECUTING", "metadata": {}}
-        if operation.startswith("import-"):
-            return {"status": self.import_status, "error": "registry unreachable"}
         body = self.operations[operation]
         value = self.stdout
         if self.encoding == "base64":

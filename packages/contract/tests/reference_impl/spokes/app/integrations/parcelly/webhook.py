@@ -37,12 +37,7 @@ async def receive_status_change(request: Request) -> JSONResponse:
         return JSONResponse(
             status_code=401, content={"code": "INVALID_SIGNATURE", "message": "bad signature"}
         )
-    try:
-        event = json.loads(raw_body)
-    except ValueError:
-        return JSONResponse(
-            status_code=400, content={"code": "INVALID_JSON", "message": "bad body"}
-        )
+    event = json.loads(raw_body)
     new_status = STATUS_MAPPING.get(event.get("status"))
     reference = event.get("reference")
     if new_status is None or not isinstance(reference, str):
@@ -52,7 +47,5 @@ async def receive_status_change(request: Request) -> JSONResponse:
         if order is None:
             return JSONResponse(status_code=200, content={"status": "ignored"})
         order.status = new_status.value
-        if order.shipment_id is None and isinstance(event.get("shipment_id"), str):
-            order.shipment_id = event["shipment_id"]
         session.commit()
     return JSONResponse(status_code=200, content={"status": "accepted"})

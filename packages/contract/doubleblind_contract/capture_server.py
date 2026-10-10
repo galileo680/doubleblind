@@ -1,7 +1,6 @@
 import json
 import threading
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from doubleblind_contract.http_server import BackgroundServer, IncomingRequest, OutgoingResponse
@@ -14,27 +13,10 @@ class CapturedWebhook:
     headers: dict[str, str]
     raw_body: bytes
     body: Any
-    received_at: float = field(default_factory=time.time)
-
-    def header(self, name: str) -> str | None:
-        lowered = name.lower()
-        for key, value in self.headers.items():
-            if key.lower() == lowered:
-                return value
-        return None
-
-    def as_match_target(self) -> dict[str, Any]:
-        return {
-            "method": self.method,
-            "path": self.path,
-            "headers": self.headers,
-            "body": self.body,
-        }
 
 
 class WebhookCapture:
-    def __init__(self, status: int = 200) -> None:
-        self.status = status
+    def __init__(self) -> None:
         self.lock = threading.Lock()
         self.captured: list[CapturedWebhook] = []
         self.server = BackgroundServer(self.handle)
@@ -74,4 +56,4 @@ class WebhookCapture:
         )
         with self.lock:
             self.captured.append(webhook)
-        return OutgoingResponse.json(self.status, {"status": "captured"})
+        return OutgoingResponse.json(200, {"status": "captured"})

@@ -13,13 +13,14 @@ from demo_workspace import BINDING_FILE, REFERENCE_CONTRACT, REFERENCE_DIR, side
 
 from doubleblind_contract.loader import load_contract_text, parse_yaml
 from doubleblind_contract.models import Side
-from doubleblind_contract.runner_consumer import run_consumer_tests
-from doubleblind_contract.runner_provider import run_provider_tests
-from doubleblind_contract.runtime import RunReport, secret_env_name
+from doubleblind_contract.runner import run_consumer_tests, run_provider_tests
+from doubleblind_contract.runtime import secret_env_name
 
 Contract = dict[str, Any]
 PatchBuilder = Callable[[Contract, Contract], list[dict[str, Any]]]
 MAX_CONFLICT_RETRIES = 8
+POLL_S = 5.0
+ANSWERS_TIMEOUT_S = 60.0
 REASON_LENGTH = 200
 
 
@@ -244,11 +245,9 @@ class ContractTestsInWorkspace:
             contract_path.write_text(contract_yaml, encoding="utf-8")
             runner = run_consumer_tests if side == "consumer" else run_provider_tests
             report = runner(contract_path, binding, env=env)
-        return test_run_payload(report, binding.read_text(encoding="utf-8"))
-
-
-def test_run_payload(report: RunReport, binding_yaml: str) -> dict[str, Any]:
-    return payload_from_report(report.to_dict(include_logs=False), binding_yaml)
+        return payload_from_report(
+            report.to_dict(include_logs=False), binding.read_text(encoding="utf-8")
+        )
 
 
 def payload_from_report(report: Mapping[str, Any], binding_yaml: str) -> dict[str, Any]:
@@ -268,14 +267,12 @@ class ScriptedParty:
         session_id: str,
         party_key: str,
         implementer: Implementer,
-        poll_s: float = 5.0,
         stop: threading.Event | None = None,
     ) -> None:
         self.client = client
         self.session_id = session_id
         self.party_key = party_key
         self.implementer = implementer
-        self.poll_s = poll_s
         self.stop = stop or threading.Event()
         self.plan = list(PLAN[party_key])
         self.reference = reference_contract()
@@ -297,7 +294,7 @@ class ScriptedParty:
             if self.stop.is_set():
                 self.log.append("stopped because the other party failed")
                 return
-            action = self.get("/next-action", wait=self.poll_s)
+            action = self.get("/next-action", wait=POLL_S)
             kind, context = action["action"], action["context"]
             if kind == "done":
                 self.log.append(f"done in state {context.get('state')}")
@@ -346,8 +343,8 @@ class ScriptedParty:
             return
         raise RuntimeError(f"{self.party_key} kept losing the race for the contract version")
 
-    def wait_for_answers(self, timeout_s: float = 60.0) -> None:
-        deadline = time.monotonic() + timeout_s
+    def wait_for_answers(self) -> None:
+        deadline = time.monotonic() + ANSWERS_TIMEOUT_S
         while time.monotonic() < deadline:
             questions = self.get("/questions")
             if all(question["answer"] is not None for question in questions):

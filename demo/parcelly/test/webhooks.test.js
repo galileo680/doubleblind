@@ -121,12 +121,11 @@ describe("webhooks", () => {
     await register(Array(10).fill(401));
     await createAndAdvance("RETURNED");
     expect(receiver.received).toHaveLength(FAST_RETRY_DELAYS_MS.length + 1);
-    const [record] = app.locals.parcelly.webhooks.deliveries();
-    expect(record.delivered).toBe(false);
   });
 
   it("skips delivery when no webhook is registered", async () => {
+    receiver = await startReceiver();
     await createAndAdvance("DELIVERED");
-    expect(app.locals.parcelly.webhooks.deliveries()).toHaveLength(0);
+    expect(receiver.received).toHaveLength(0);
   });
 });

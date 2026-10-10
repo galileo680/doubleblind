@@ -9,11 +9,7 @@
       "native_tools": true,
       "json_schema": true,
       "thinking": {
-        "toggle": "chat_template_kwargs",
-        "reasoning_fields": [
-          "reasoning"
-        ],
-        "reasoning_budget_param": true
+        "toggle": "chat_template_kwargs"
       },
       "latency_ms": 574,
       "errors": []
@@ -25,12 +21,7 @@
       "native_tools": true,
       "json_schema": true,
       "thinking": {
-        "toggle": "chat_template_kwargs",
-        "reasoning_fields": [
-          "reasoning_content",
-          "reasoning"
-        ],
-        "reasoning_budget_param": true
+        "toggle": "chat_template_kwargs"
       },
       "latency_ms": 297,
       "errors": []
@@ -42,11 +33,7 @@
       "native_tools": true,
       "json_schema": true,
       "thinking": {
-        "toggle": "chat_template_kwargs",
-        "reasoning_fields": [
-          "reasoning_content"
-        ],
-        "reasoning_budget_param": true
+        "toggle": "chat_template_kwargs"
       },
       "latency_ms": 254,
       "errors": []
@@ -58,12 +45,7 @@
       "native_tools": true,
       "json_schema": true,
       "thinking": {
-        "toggle": "chat_template_kwargs",
-        "reasoning_fields": [
-          "reasoning_content",
-          "reasoning"
-        ],
-        "reasoning_budget_param": true
+        "toggle": "chat_template_kwargs"
       },
       "latency_ms": 243,
       "errors": []

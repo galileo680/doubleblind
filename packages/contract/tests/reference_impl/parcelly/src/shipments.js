@@ -3,8 +3,8 @@ import { ApiError } from "./errors.js";
 import { validatePalletRequest, validateShipmentRequest } from "./validation.js";
 import { STATUS_CHANGED_EVENT } from "./webhooks.js";
 
-export const PARCEL_PRICES_GR = Object.freeze({ A: 1299, B: 1599, C: 1999 });
-export const PALLET_PRICE_GR = 8900;
+const PARCEL_PRICES_GR = Object.freeze({ A: 1299, B: 1599, C: 1999 });
+const PALLET_PRICE_GR = 8900;
 
 const SERVICES = Object.freeze({
   parcel: {
@@ -42,19 +42,11 @@ function shipmentNotFound() {
   return new ApiError(404, "SHIPMENT_NOT_FOUND", "Shipment not found");
 }
 
-export function createShipmentService({ partners, webhooks, clock = () => new Date() }) {
+export function createShipmentService({ partners, webhooks }) {
   const shipments = new Map();
   const idempotencyKeys = new Map();
   const charges = [];
   const counters = { parcel: 0, pallet: 0 };
-  let sequence = 0;
-
-  function latest(candidates) {
-    return candidates.reduce(
-      (newest, shipment) => (newest === null || shipment.seq > newest.seq ? shipment : newest),
-      null,
-    );
-  }
 
   return {
     create(partner, serviceName, body, idempotencyKey) {
@@ -72,11 +64,9 @@ export function createShipmentService({ partners, webhooks, clock = () => new Da
       const service = SERVICES[serviceName];
       service.validate(body);
       counters[serviceName] += 1;
-      sequence += 1;
       const number = counters[serviceName];
-      const now = clock().toISOString();
+      const now = new Date().toISOString();
       const shipment = {
-        seq: sequence,
         id: `${service.idPrefix}_${number}`,
         service: serviceName,
         partnerId: partner.id,
@@ -109,12 +99,12 @@ export function createShipmentService({ partners, webhooks, clock = () => new Da
     },
 
     findLatestByReference(reference, partner = null) {
-      const candidates = [...shipments.values()].filter(
-        (shipment) =>
-          shipment.reference === reference &&
-          (partner === null || shipment.partnerId === partner.id),
+      const shipment = [...shipments.values()].findLast(
+        (candidate) =>
+          candidate.reference === reference &&
+          (partner === null || candidate.partnerId === partner.id),
       );
-      return latest(candidates);
+      return shipment ?? null;
     },
 
     get(id) {
@@ -126,7 +116,7 @@ export function createShipmentService({ partners, webhooks, clock = () => new Da
         return shipment;
       }
       shipment.status = status;
-      shipment.updatedAt = clock().toISOString();
+      shipment.updatedAt = new Date().toISOString();
       const webhook = partners.get(shipment.partnerId)?.webhook;
       if (webhook) {
         webhooks.dispatch(webhook, {
@@ -155,7 +145,6 @@ export function createShipmentService({ partners, webhooks, clock = () => new Da
       charges.length = 0;
       counters.parcel = 0;
       counters.pallet = 0;
-      sequence = 0;
     },
   };
 }

@@ -7,14 +7,9 @@ from typing import Any
 import httpx
 from jsonschema import Draft202012Validator
 
-from doubleblind_contract.binding import (
-    BindingCallError,
-    CallKind,
-    PartyClient,
-    capture_values,
-    parse_response_body,
-)
+from doubleblind_contract.binding import CallKind, PartyClient, capture_values, parse_response_body
 from doubleblind_contract.capture_server import CapturedWebhook, WebhookCapture
+from doubleblind_contract.http_server import header_value
 from doubleblind_contract.loader import format_path
 from doubleblind_contract.matcher import match, resolve_path
 from doubleblind_contract.models import Contract, PartyRole, Scenario, Side
@@ -35,6 +30,15 @@ def snippet(text: str) -> str:
     return text if len(text) <= SNIPPET_LENGTH else f"{text[:SNIPPET_LENGTH]}..."
 
 
+def match_target(entry: ReceivedRequest | CapturedWebhook) -> dict[str, Any]:
+    return {
+        "method": entry.method,
+        "path": entry.path,
+        "headers": entry.headers,
+        "body": entry.body,
+    }
+
+
 @dataclass
 class RunEnvironment:
     contract: Contract
@@ -45,7 +49,7 @@ class RunEnvironment:
     parties: dict[PartyRole, PartyClient] = field(default_factory=dict)
     stub: ProviderStub | None = None
     capture: WebhookCapture | None = None
-    provider_base_url: str | None = None
+    provider_base_url: str = ""
     urls: dict[str, dict[str, str]] = field(default_factory=dict)
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
@@ -107,28 +111,25 @@ class ScenarioExecutor:
             raise StepFailed([self.fail("", None, None, f"template error: {error}")]) from error
         getattr(self, f"run_{kind}")(spec)
 
-    def wait_for(self, check: Check, within_s: float) -> list[Failure]:
+    def wait_for(
+        self,
+        check: Check,
+        within_s: float,
+        interval_s: float = POLL_INTERVAL_S,
+        until_failure: bool = False,
+    ) -> list[Failure]:
         deadline = self.environment.clock() + within_s
         while True:
             failures = check()
-            if not failures or self.environment.clock() >= deadline:
+            if bool(failures) == until_failure or self.environment.clock() >= deadline:
                 return failures
-            self.environment.sleep(POLL_INTERVAL_S)
-
-    def party(self, role: PartyRole) -> PartyClient:
-        client = self.environment.parties.get(role)
-        if client is None:
-            raise StepFailed([self.fail("", None, None, f"no {role} binding was given")])
-        return client
+            self.environment.sleep(interval_s)
 
     def call_party(
         self, role: PartyRole, kind: CallKind, name: str, args: Any
     ) -> tuple[int, Any, str]:
-        client = self.party(role)
         try:
-            result = client.call(kind, name, self.variables(args))
-        except BindingCallError as error:
-            raise StepFailed([self.fail(kind, name, None, str(error))]) from error
+            result = self.environment.parties[role].call(kind, name, self.variables(args))
         except TemplateError as error:
             raise StepFailed([self.fail(kind, None, None, f"template error: {error}")]) from error
         if result.capture_problems:
@@ -155,8 +156,6 @@ class ScenarioExecutor:
     def run_send(self, spec: dict[str, Any]) -> None:
         contract = self.environment.contract
         operation = contract.operations[spec["operation"]]
-        if self.environment.provider_base_url is None:
-            raise StepFailed([self.fail("", None, None, "no provider base URL for send")])
         request: dict[str, Any] = {"headers": spec.get("headers") or {}}
         if "body" in spec:
             request["json"] = spec["body"]
@@ -202,7 +201,8 @@ class ScenarioExecutor:
             self.ctx.update(values)
 
     def run_emit(self, spec: dict[str, Any]) -> None:
-        stub = self.require_stub()
+        stub = self.environment.stub
+        assert stub is not None
         status, text = stub.emit(spec["webhook"], spec["body"], spec["signature"])
         expected = spec["expect"]["status"]
         if status != expected:
@@ -219,7 +219,8 @@ class ScenarioExecutor:
             )
 
     def run_expect_received(self, spec: dict[str, Any]) -> None:
-        stub = self.require_stub()
+        stub = self.environment.stub
+        assert stub is not None
         operation = spec["operation"]
 
         def check() -> list[Failure]:
@@ -234,7 +235,7 @@ class ScenarioExecutor:
                 )
             for path, expected_distinct in (spec.get("distinct") or {}).items():
                 values = {
-                    json.dumps(resolve_path(entry.as_match_target(), path), default=str)
+                    json.dumps(resolve_path(match_target(entry), path), default=str)
                     for entry in entries
                 }
                 if len(values) != expected_distinct:
@@ -248,41 +249,33 @@ class ScenarioExecutor:
                     )
             for number, entry in enumerate(entries, start=1):
                 suffix = f" (request {number} of {len(entries)})" if len(entries) > 1 else ""
-                failures += self.match_failures(entry.as_match_target(), spec.get("match"), suffix)
+                failures += self.match_failures(match_target(entry), spec.get("match"), suffix)
             return failures
 
         self.raise_if(self.wait_for(check, spec.get("within_s", DEFAULT_WAIT_S)))
 
     def run_expect_no_request(self, spec: dict[str, Any]) -> None:
-        stub = self.require_stub()
+        stub = self.environment.stub
+        assert stub is not None
         operation = spec.get("operation")
 
-        def unexpected() -> list[ReceivedRequest]:
+        def check() -> list[Failure]:
             return [
-                entry for entry in stub.log() if operation is None or entry.operation == operation
-            ]
-
-        deadline = self.environment.clock() + spec["within_s"]
-        while True:
-            found = unexpected()
-            if found:
-                entry = found[0]
-                raise StepFailed(
-                    [
-                        self.fail(
-                            "",
-                            "no request",
-                            f"{entry.method} {entry.path}",
-                            f"a {entry.operation or 'request'} was received but none was expected",
-                        )
-                    ]
+                self.fail(
+                    "",
+                    "no request",
+                    f"{entry.method} {entry.path}",
+                    f"a {entry.operation or 'request'} was received but none was expected",
                 )
-            if self.environment.clock() >= deadline:
-                return
-            self.environment.sleep(POLL_INTERVAL_S)
+                for entry in stub.log()
+                if operation is None or entry.operation == operation
+            ][:1]
+
+        self.raise_if(self.wait_for(check, spec["within_s"], until_failure=True))
 
     def run_expect_emitted(self, spec: dict[str, Any]) -> None:
-        capture = self.require_capture()
+        capture = self.environment.capture
+        assert capture is not None
         webhook = self.environment.contract.webhooks[spec["webhook"]]
 
         def check() -> list[Failure]:
@@ -293,10 +286,10 @@ class ScenarioExecutor:
             matching = [
                 item
                 for item in captured
-                if not expected_match or not match(item.as_match_target(), expected_match)
+                if not expected_match or not match(match_target(item), expected_match)
             ]
             if not matching:
-                return self.match_failures(captured[-1].as_match_target(), expected_match)
+                return self.match_failures(match_target(captured[-1]), expected_match)
             failures: list[Failure] = []
             count = spec.get("count")
             if count is not None and len(matching) != count:
@@ -313,7 +306,7 @@ class ScenarioExecutor:
         failures = self.schema_failures(schema, item.body, "body")
         signature = self.environment.contract.webhooks[spec["webhook"]].signature
         if spec.get("signature") == "valid" and signature is not None:
-            header = item.header(signature.header)
+            header = header_value(item.headers, signature.header)
             secret = self.environment.secrets[signature.secret]
             if not verify(secret, item.raw_body, header, signature.format):
                 failures.append(
@@ -342,20 +335,17 @@ class ScenarioExecutor:
                 ]
             return self.match_failures(body, spec["match"])
 
-        eventually = spec.get("eventually")
-        if eventually is None:
-            self.raise_if(check())
-            return
-        deadline = self.environment.clock() + eventually["timeout_s"]
-        while True:
-            failures = check()
-            if not failures or self.environment.clock() >= deadline:
-                self.raise_if(failures)
-                return
-            self.environment.sleep(eventually["interval_s"])
+        eventually = spec.get("eventually") or {}
+        self.raise_if(
+            self.wait_for(
+                check,
+                eventually.get("timeout_s", 0),
+                eventually.get("interval_s", POLL_INTERVAL_S),
+            )
+        )
 
     def automatic_checks(self) -> list[Failure]:
-        if self.environment.side != "consumer" or self.environment.stub is None:
+        if self.environment.stub is None:
             return []
         return [
             Failure(
@@ -395,13 +385,3 @@ class ScenarioExecutor:
     def raise_if(self, failures: list[Failure]) -> None:
         if failures:
             raise StepFailed(failures)
-
-    def require_stub(self) -> ProviderStub:
-        if self.environment.stub is None:
-            raise StepFailed([self.fail("", None, None, "this step needs the provider stub")])
-        return self.environment.stub
-
-    def require_capture(self) -> WebhookCapture:
-        if self.environment.capture is None:
-            raise StepFailed([self.fail("", None, None, "this step needs the capture server")])
-        return self.environment.capture

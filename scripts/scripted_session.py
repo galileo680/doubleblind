@@ -1,4 +1,5 @@
 import argparse
+import copy
 import os
 import sys
 import tempfile
@@ -31,12 +32,12 @@ from scripted_party import (
 
 from doubleblind_broker.app import create_app
 from doubleblind_broker.autopilot import DefaultOptionSimulator
-from doubleblind_broker.contracts import load_yaml, normalized
 from doubleblind_broker.db import build_engine
 from doubleblind_broker.e2e import E2EExecutor, E2ERequest, LocalProcessE2E, SandboxGatewayE2E
 from doubleblind_broker.service import BrokerService, BrokerSettings, IsolationProbe
-from doubleblind_contract.loader import load_contract_text
+from doubleblind_contract.loader import load_contract_text, parse_yaml
 from doubleblind_contract.runtime import RunReport, ScenarioResult, free_port, utc_timestamp
+from doubleblind_sandbox.environment import gateway_url
 from doubleblind_sandbox.local import LocalSandboxProvider
 
 PRESET = "spokes-parcelly"
@@ -53,6 +54,17 @@ class ReportedGreenE2E:
         ]
         report.finished_at = utc_timestamp()
         return report
+
+
+def normalized(contract: dict[str, Any]) -> dict[str, Any]:
+    data = copy.deepcopy(contract)
+    for key in ("decisions", "scenarios"):
+        items = data.get(key, [])
+        for item in items:
+            if isinstance(item, dict):
+                item.pop("origin_question", None)
+        data[key] = sorted(items, key=lambda item: str(item.get("id", "")))
+    return data
 
 
 @dataclass
@@ -146,7 +158,7 @@ def run_session(
             if after is not None:
                 after(viewer, session_id)
             state = viewer.get(f"/api/v1/sessions/{session_id}").json()["state"]
-            contract = load_yaml(viewer.get(f"/api/v1/sessions/{session_id}/contract").text)
+            contract = parse_yaml(viewer.get(f"/api/v1/sessions/{session_id}/contract").text)
             certificate = viewer.get(f"/api/v1/sessions/{session_id}/certificate").json()
             events = viewer.get(f"/api/v1/sessions/{session_id}/events").json()
         for party in parties.values():
@@ -184,19 +196,6 @@ def run_quick_session(
     )
 
 
-def gateway_url(kind: SandboxKind, port: int) -> str:
-    public = os.environ.get("BROKER_PUBLIC_URL")
-    if public:
-        return public
-    if kind == "tokenfactory":
-        raise RuntimeError(
-            "Token Factory sandboxes reach the gateway only through BROKER_PUBLIC_URL;"
-            " set it or use --e2e cleanroom"
-        )
-    host = "host.docker.internal" if kind == "docker" else "127.0.0.1"
-    return f"http://{host}:{port}"
-
-
 def run_sandbox_session(
     kind: SandboxKind, e2e_mode: E2EMode, timeout_s: float = 1200.0
 ) -> SessionOutcome:
@@ -205,7 +204,7 @@ def run_sandbox_session(
         local_root = root / "sandbox"
         factory = sandbox_factory(kind, local_root)
         try:
-            bases = base_heads(kind, factory)
+            bases = base_heads(kind, local_root)
             implementers: dict[str, Implementer] = {
                 party: ContractTestsInSandbox(factory, party, bases[party]) for party in PARTIES
             }
@@ -219,8 +218,14 @@ def run_sandbox_session(
                 finally:
                     workspace.remove()
             port = int(os.environ.get("BROKER_PORT", "0")) or free_port()
+            url = gateway_url(kind, port)
+            if url is None:
+                raise RuntimeError(
+                    "Token Factory sandboxes reach the gateway only through BROKER_PUBLIC_URL;"
+                    " set it or use --e2e cleanroom"
+                )
             host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
-            gateway = SandboxGatewayE2E(factory, gateway_url(kind, port))
+            gateway = SandboxGatewayE2E(factory, url)
             return run_session(gateway, implementers, timeout_s=timeout_s, port=port, host=host)
         finally:
             LocalSandboxProvider(local_root).remove_all()
@@ -228,9 +233,6 @@ def run_sandbox_session(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run a DoubleBlind session with scripted parties")
-    parser.add_argument(
-        "--quick", action="store_true", help="report green tests instead of running the apps"
-    )
     parser.add_argument(
         "--sandbox",
         choices=["local", "tokenfactory", "docker"],
@@ -244,9 +246,7 @@ def main() -> None:
     )
     arguments = parser.parse_args()
     cost_before = sandbox_cost_usd()
-    if arguments.quick:
-        outcome = run_quick_session()
-    elif arguments.sandbox:
+    if arguments.sandbox:
         outcome = run_sandbox_session(arguments.sandbox, arguments.e2e)
     else:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:

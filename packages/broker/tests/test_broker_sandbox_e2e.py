@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 from broker_helpers import Broker, broker, run_payload, signed
 
@@ -78,8 +79,9 @@ def test_isolation_probe_adds_sandbox_probes_and_emits_an_event() -> None:
     assert events[0]["payload"] == probe
 
 
-def request(images: dict[str, str], tokens: dict[str, str]) -> E2ERequest:
-    return E2ERequest(
+def test_sandbox_e2e_needs_workspace_images(tmp_path: Path) -> None:
+    executor = SandboxGatewayE2E(lambda: LocalSandboxProvider(tmp_path), "http://127.0.0.1:1")
+    request = E2ERequest(
         session_id="ses_1",
         contract_yaml="",
         contract_id="c",
@@ -88,18 +90,13 @@ def request(images: dict[str, str], tokens: dict[str, str]) -> E2ERequest:
         provider_party="parcelly",
         consumer_binding="",
         provider_binding="",
-        images=images,
-        relay_tokens=tokens,
+        secrets={},
+        images={"spokes": "a"},
+        relay_tokens={},
     )
 
-
-def test_sandbox_e2e_needs_images_and_relay_tokens() -> None:
-    executor = SandboxGatewayE2E(LocalSandboxProvider, "http://127.0.0.1:1")
-
-    without_images = executor.run(request({"spokes": "a"}, {"spokes": "t", "parcelly": "t"}))
-    without_tokens = executor.run(request({"spokes": "a", "parcelly": "b"}, {"spokes": "t"}))
+    without_images = executor.run(request)
 
     assert (
         "no green workspace image for parcelly" in without_images.scenarios[0].failures[0].message
     )
-    assert "no relay token for parcelly" in without_tokens.scenarios[0].failures[0].message

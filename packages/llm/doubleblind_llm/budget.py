@@ -68,9 +68,6 @@ class BudgetGuard:
         if spent + estimate_usd > self.limit_usd:
             raise BudgetExceededError(spent, estimate_usd, self.limit_usd)
 
-    def remaining_usd(self) -> float:
-        return self.limit_usd - self.ledger.total_usd()
-
 
 def ledger_path_from_env(repo_root: Path) -> Path:
     configured = os.environ.get(LEDGER_ENV)

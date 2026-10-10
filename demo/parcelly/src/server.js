@@ -22,20 +22,13 @@ function routeNotFound(request, response) {
     .json({ code: "NOT_FOUND", message: `No route for ${request.method} ${request.path}` });
 }
 
-export function createApp({
-  sandbox = false,
-  log = false,
-  webhookRetryDelaysMs,
-  fetchImpl,
-  clock,
-} = {}) {
+export function createApp({ sandbox = false, log = false, webhookRetryDelaysMs } = {}) {
   const partners = createPartnerRegistry();
   const webhooks = createWebhookDispatcher({
     retryDelaysMs: webhookRetryDelaysMs,
-    fetchImpl,
     log: log ? (message) => console.warn(message) : undefined,
   });
-  const shipments = createShipmentService({ partners, webhooks, clock });
+  const shipments = createShipmentService({ partners, webhooks });
 
   const app = express();
   app.disable("x-powered-by");
@@ -44,7 +37,7 @@ export function createApp({
   if (log) {
     app.use(requestLogger);
   }
-  app.use(express.json({ limit: "100kb" }));
+  app.use(express.json());
 
   app.get("/health", (request, response) => {
     response.json({ status: "ok", sandbox });

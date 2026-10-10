@@ -11,41 +11,31 @@ from doubleblind_contract.models import Side
 from doubleblind_contract.runtime import secret_env_name
 from doubleblind_llm.budget import Ledger, ledger_path_from_env
 from doubleblind_llm.settings import load_dotenv
-from doubleblind_sandbox.costs import LedgerCosts
-from doubleblind_sandbox.docker import DockerSandboxProvider
+from doubleblind_sandbox.environment import recorded_bases, remote_sandbox
 from doubleblind_sandbox.images import repo_files
 from doubleblind_sandbox.local import LocalSandboxProvider
 from doubleblind_sandbox.provider import REPO_DIR, ServiceSandbox, Workspace, repo_path
-from doubleblind_sandbox.tokenfactory import TokenFactorySandboxProvider
 
 SandboxKind = Literal["local", "tokenfactory", "docker"]
 SandboxFactory = Callable[[], ServiceSandbox]
 ENTRY = REPO_ROOT / "scripts" / "contract_test_entry.py"
 WORK_DIR = ".doubleblind"
-BASE_IMAGES_FILES = {
-    "tokenfactory": REPO_ROOT / "volumes" / "base-images.json",
-    "docker": REPO_ROOT / "volumes" / "base-images.docker.json",
-}
 TEST_TIMEOUT_S = 600
 PARTIES = ("spokes", "parcelly")
 
 
-def sandbox_factory(kind: SandboxKind, local_root: Path | None = None) -> SandboxFactory:
+def local_sandbox(root: Path) -> LocalSandboxProvider:
+    return LocalSandboxProvider(
+        root, {f"{REPO_DIR}/node_modules": DEMO_DIR / "parcelly" / "node_modules"}
+    )
+
+
+def sandbox_factory(kind: SandboxKind, local_root: Path) -> SandboxFactory:
+    if kind == "local":
+        return lambda: local_sandbox(local_root)
     if kind == "tokenfactory":
         load_dotenv(REPO_ROOT / ".env")
-        return lambda: TokenFactorySandboxProvider.from_env(LedgerCosts.from_env(REPO_ROOT))
-    if kind == "docker":
-        return DockerSandboxProvider
-    shared = {f"{REPO_DIR}/node_modules": DEMO_DIR / "parcelly" / "node_modules"}
-    return lambda: LocalSandboxProvider(local_root, shared)
-
-
-def recorded_bases(kind: SandboxKind) -> dict[str, str]:
-    path = BASE_IMAGES_FILES.get(kind)
-    if path is None or not path.is_file():
-        raise RuntimeError(f"no base images for {kind}; run scripts/build_base_images.py first")
-    tags: dict[str, str] = json.loads(path.read_text(encoding="utf-8"))
-    return {party: f"tag:{tags[party]}" for party in PARTIES}
+    return remote_sandbox(kind)
 
 
 async def import_local_bases(provider: LocalSandboxProvider) -> dict[str, str]:
@@ -55,13 +45,13 @@ async def import_local_bases(provider: LocalSandboxProvider) -> dict[str, str]:
     }
 
 
-def base_heads(kind: SandboxKind, factory: SandboxFactory) -> dict[str, str]:
-    if kind != "local":
-        return recorded_bases(kind)
-    provider = factory()
-    if not isinstance(provider, LocalSandboxProvider):
-        raise RuntimeError("the local sandbox factory must build local providers")
-    return asyncio.run(import_local_bases(provider))
+def base_heads(kind: SandboxKind, local_root: Path) -> dict[str, str]:
+    if kind == "local":
+        return asyncio.run(import_local_bases(local_sandbox(local_root)))
+    bases = recorded_bases(kind)
+    if bases is None:
+        raise RuntimeError(f"no base images for {kind}; run scripts/build_base_images.py first")
+    return bases
 
 
 class ContractTestsInSandbox:
@@ -79,11 +69,7 @@ class ContractTestsInSandbox:
     async def apply_reference(self, sandbox: ServiceSandbox) -> Workspace:
         if self.workspace is None:
             workspace = await sandbox.open_workspace(self.party_key, self.base)
-            written = await sandbox.write_files(
-                workspace, repo_files(REFERENCE_DIR / self.party_key)
-            )
-            if not written.ok:
-                raise RuntimeError(f"writing the implementation failed: {written.output()[-500:]}")
+            await sandbox.write_files(workspace, repo_files(REFERENCE_DIR / self.party_key))
             self.workspace = workspace
         return self.workspace
 

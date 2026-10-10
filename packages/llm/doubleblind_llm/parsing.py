@@ -85,19 +85,15 @@ def parse_native_tool_calls(raw_calls: list[dict[str, Any]]) -> list[ToolCall]:
     calls: list[ToolCall] = []
     for index, raw in enumerate(raw_calls):
         function = raw.get("function") or {}
-        raw_arguments = function.get("arguments") or "{}"
-        if isinstance(raw_arguments, dict):
-            arguments = raw_arguments
-            raw_arguments = json.dumps(raw_arguments, ensure_ascii=False)
-        else:
-            parsed = extract_json_value(raw_arguments)
+        arguments = function.get("arguments") or "{}"
+        if not isinstance(arguments, dict):
+            parsed = extract_json_value(arguments)
             arguments = parsed if isinstance(parsed, dict) else {}
         calls.append(
             ToolCall(
                 id=str(raw.get("id") or f"call_{index}"),
                 name=str(function.get("name", "")),
                 arguments=arguments,
-                raw_arguments=str(raw_arguments),
             )
         )
     return calls
@@ -110,14 +106,7 @@ def parse_fallback_tool_calls(content: str | None, tool_names: set[str]) -> list
         arguments = candidate.get("args") or candidate.get("arguments") or {}
         if not isinstance(arguments, dict):
             arguments = {}
-        return [
-            ToolCall(
-                id="fallback_0",
-                name=str(candidate["tool"]),
-                arguments=arguments,
-                raw_arguments=json.dumps(arguments, ensure_ascii=False),
-            )
-        ]
+        return [ToolCall(id="fallback_0", name=str(candidate["tool"]), arguments=arguments)]
     return []
 
 

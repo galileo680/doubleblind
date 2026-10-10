@@ -3,7 +3,7 @@ import os
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -12,7 +12,7 @@ import httpx
 import doubleblind_sandbox.relay_client as relay_module
 from doubleblind_contract.loader import load_binding_text
 from doubleblind_contract.models import Binding
-from doubleblind_contract.runner_e2e import run_e2e_tests
+from doubleblind_contract.runner import run_e2e_tests
 from doubleblind_contract.runtime import (
     Failure,
     RunReport,
@@ -41,9 +41,9 @@ class E2ERequest:
     provider_party: str
     consumer_binding: str
     provider_binding: str
-    secrets: Mapping[str, str] = field(default_factory=dict)
-    images: Mapping[str, str] = field(default_factory=dict)
-    relay_tokens: Mapping[str, str] = field(default_factory=dict)
+    secrets: Mapping[str, str]
+    images: Mapping[str, str]
+    relay_tokens: Mapping[str, str]
 
 
 class E2EExecutor(Protocol):
@@ -59,6 +59,24 @@ def error_report(request: E2ERequest, message: str) -> RunReport:
     ]
     report.finished_at = utc_timestamp()
     return report
+
+
+def e2e_environment(
+    request: E2ERequest, inherited: Mapping[str, str], base_url: Callable[[str, int], str]
+) -> dict[str, str]:
+    env = dict(inherited)
+    for prefix, party in (
+        ("CONSUMER", request.consumer_party),
+        ("PROVIDER", request.provider_party),
+    ):
+        port = free_port()
+        env[f"{prefix}_PORT"] = str(port)
+        env[f"{prefix}_BASE_URL"] = base_url(party, port)
+    env.update({secret_env_name(name): value for name, value in request.secrets.items()})
+    consumer = load_binding_text(request.consumer_binding, env=env)
+    if consumer.webhook_receiver_url:
+        env["CONSUMER_WEBHOOK_URL"] = consumer.webhook_receiver_url
+    return env
 
 
 def run_with_files(request: E2ERequest, env: Mapping[str, str]) -> RunReport:
@@ -84,21 +102,6 @@ class LocalProcessE2E:
     def __init__(self, workspaces: Mapping[str, Path]) -> None:
         self.workspaces = {party: Path(path) for party, path in workspaces.items()}
 
-    def environment(self, request: E2ERequest) -> dict[str, str]:
-        consumer_port, provider_port = free_port(), free_port()
-        env = {
-            **os.environ,
-            "CONSUMER_PORT": str(consumer_port),
-            "CONSUMER_BASE_URL": f"http://127.0.0.1:{consumer_port}",
-            "PROVIDER_PORT": str(provider_port),
-            "PROVIDER_BASE_URL": f"http://127.0.0.1:{provider_port}",
-        }
-        env.update({secret_env_name(name): value for name, value in request.secrets.items()})
-        consumer = load_binding_text(request.consumer_binding, env=env)
-        if consumer.webhook_receiver_url:
-            env["CONSUMER_WEBHOOK_URL"] = consumer.webhook_receiver_url
-        return env
-
     def run(self, request: E2ERequest) -> RunReport:
         missing = [
             party
@@ -118,7 +121,9 @@ class LocalProcessE2E:
                 contract_path,
                 consumer_binding,
                 provider_binding,
-                env=self.environment(request),
+                env=e2e_environment(
+                    request, os.environ, lambda party, port: f"http://127.0.0.1:{port}"
+                ),
                 start_apps=True,
             )
 
@@ -136,40 +141,16 @@ class E2EParty:
 
 
 class SandboxGatewayE2E:
-    def __init__(
-        self,
-        sandbox_factory: Callable[[], ServiceSandbox],
-        broker_url: str,
-        health_timeout_s: float = HEALTH_TIMEOUT_S,
-    ) -> None:
+    def __init__(self, sandbox_factory: Callable[[], ServiceSandbox], broker_url: str) -> None:
         self.sandbox_factory = sandbox_factory
         self.broker_url = broker_url.rstrip("/")
-        self.health_timeout_s = health_timeout_s
 
     def run(self, request: E2ERequest) -> RunReport:
         parties = (request.consumer_party, request.provider_party)
         missing = [party for party in parties if party not in request.images]
         if missing:
             return error_report(request, f"no green workspace image for {', '.join(missing)}")
-        absent = [party for party in parties if party not in request.relay_tokens]
-        if absent:
-            return error_report(request, f"no relay token for {', '.join(absent)}")
         return asyncio.run(self.execute(request))
-
-    def environment(self, request: E2ERequest) -> dict[str, str]:
-        gateway = f"{self.broker_url}/gw/{request.session_id}"
-        consumer_port, provider_port = free_port(), free_port()
-        env = {
-            "CONSUMER_PORT": str(consumer_port),
-            "CONSUMER_BASE_URL": f"{gateway}/{request.consumer_party}",
-            "PROVIDER_PORT": str(provider_port),
-            "PROVIDER_BASE_URL": f"{gateway}/{request.provider_party}",
-        }
-        env.update({secret_env_name(name): value for name, value in request.secrets.items()})
-        consumer = load_binding_text(request.consumer_binding, env=env)
-        if consumer.webhook_receiver_url:
-            env["CONSUMER_WEBHOOK_URL"] = consumer.webhook_receiver_url
-        return env
 
     def parties(self, request: E2ERequest, env: Mapping[str, str]) -> list[E2EParty]:
         return [
@@ -216,7 +197,7 @@ class SandboxGatewayE2E:
         )
 
     async def wait_until_healthy(self, parties: Sequence[E2EParty]) -> None:
-        deadline = time.monotonic() + self.health_timeout_s
+        deadline = time.monotonic() + HEALTH_TIMEOUT_S
         async with httpx.AsyncClient(timeout=30.0) as http:
             for party in parties:
                 health = party.binding.app.healthcheck if party.binding.app else None
@@ -234,7 +215,8 @@ class SandboxGatewayE2E:
                     await asyncio.sleep(HEALTH_RETRY_S)
 
     async def execute(self, request: E2ERequest) -> RunReport:
-        env = self.environment(request)
+        gateway = f"{self.broker_url}/gw/{request.session_id}"
+        env = e2e_environment(request, {}, lambda party, port: f"{gateway}/{party}")
         parties = self.parties(request, env)
         sandbox = self.sandbox_factory()
         handles: list[ServiceHandle] = []

@@ -158,19 +158,6 @@ async def test_read_file_downloads_and_falls_back_to_cat() -> None:
     assert api.instances[-1]["command"] == "base64 -w0 '/workspace/repo/b.py'"
 
 
-async def test_import_reuses_an_existing_tag_and_reports_failures() -> None:
-    api = FakeSandboxApi()
-    sandbox = provider(api)
-
-    imported = await sandbox.import_image("docker://node:24-slim", "node:24-slim")
-    again = await sandbox.import_image("docker://node:24-slim", "node:24-slim")
-    api.import_status = "FAILED"
-
-    assert imported == again == "image-imported"
-    with pytest.raises(SandboxError, match="registry unreachable"):
-        await sandbox.import_image("docker://broken", "broken")
-
-
 async def test_slow_operations_are_cancelled() -> None:
     api = FakeSandboxApi()
     api.pending_polls = 10_000
@@ -189,11 +176,11 @@ async def test_service_can_be_stopped_and_its_cost_recorded(tmp_path: Path) -> N
     workspace = await sandbox.open_workspace("spokes", "tag:base")
 
     handle = await sandbox.start_service(workspace, "python -m http.server")
-    cost = await sandbox.stop_service(handle)
+    await sandbox.stop_service(handle)
 
     assert api.instances[0]["networking"] == {"enabled": True}
     assert api.deleted == ["op-1"]
-    assert cost == 0.0012
+    assert ledger.entries()[0].cost_usd == 0.0012
     assert ledger.entries()[0].note == "service"
 
 
@@ -204,6 +191,6 @@ def test_from_env_needs_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(SandboxError, match="NEBIUS_API_KEY"):
         TokenFactorySandboxProvider.from_env()
 
-    monkeypatch.setenv("SPOKES_SANDBOX_API_KEY", "k")
-    monkeypatch.setenv("SPOKES_SANDBOX_PROJECT_ID", "p")
-    assert TokenFactorySandboxProvider.from_env(prefix="SPOKES_").name == "tokenfactory"
+    monkeypatch.setenv("SANDBOX_API_KEY", "k")
+    monkeypatch.setenv("SANDBOX_PROJECT_ID", "p")
+    assert TokenFactorySandboxProvider.from_env().name == "tokenfactory"

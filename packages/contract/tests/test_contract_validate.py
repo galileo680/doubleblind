@@ -13,6 +13,7 @@ from contract_fixtures import (
 from doubleblind_contract.loader import load_binding, load_binding_text
 from doubleblind_contract.validate import (
     Finding,
+    ValidationReport,
     check_binding_text,
     validate_contract_file,
     validate_contract_text,
@@ -249,12 +250,9 @@ def test_finding_renders_and_serializes() -> None:
 
     assert finding.render() == "error   [rule 2] a.b: broken"
     assert Finding("yaml", "error", "", "empty").render() == "error   [yaml] empty"
-    assert finding.to_dict() == {
-        "rule": "rule 2",
-        "severity": "error",
-        "path": "a.b",
-        "message": "broken",
-    }
+    assert ValidationReport([finding]).to_dict()["findings"] == [
+        {"rule": "rule 2", "severity": "error", "path": "a.b", "message": "broken"}
+    ]
 
 
 def test_report_serializes_with_counts() -> None:

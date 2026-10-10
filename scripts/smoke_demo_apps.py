@@ -3,7 +3,6 @@ import hmac
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
@@ -17,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+from doubleblind_contract.runtime import free_port
 
 ROOT = Path(__file__).resolve().parent.parent
 SPOKES = ROOT / "demo" / "spokes"
@@ -79,13 +80,6 @@ class WebhookReceiver:
     def __exit__(self, *exc_info: object) -> None:
         self.server.shutdown()
         self.server.server_close()
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port: int = sock.getsockname()[1]
-        return port
 
 
 def wait_until_healthy(process: subprocess.Popen[bytes], url: str) -> None:

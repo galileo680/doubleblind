@@ -108,20 +108,22 @@ def main() -> None:
     parser.add_argument("--broker", required=True)
     parser.add_argument("--session", required=True)
     parser.add_argument("--party", required=True)
-    parser.add_argument("--token", default=os.environ.get("DOUBLEBLIND_RELAY_TOKEN"))
     parser.add_argument("--target", required=True)
     parser.add_argument("--wait", type=int, default=25)
-    parser.add_argument("--app", default=os.environ.get("DOUBLEBLIND_APP_COMMAND"))
-    parser.add_argument("--app-cwd", default=os.environ.get("DOUBLEBLIND_APP_CWD", "."))
     arguments = parser.parse_args()
-    if not arguments.token:
-        parser.error("pass --token or set DOUBLEBLIND_RELAY_TOKEN")
-    environment = {
-        key: value for key, value in os.environ.items() if key != "DOUBLEBLIND_RELAY_TOKEN"
-    }
+    environment = dict(os.environ)
+    token = environment.pop("DOUBLEBLIND_RELAY_TOKEN", None)
+    if not token:
+        parser.error("set DOUBLEBLIND_RELAY_TOKEN")
+    command = environment.get("DOUBLEBLIND_APP_COMMAND")
     app = (
-        subprocess.Popen(arguments.app, shell=True, cwd=arguments.app_cwd, env=environment)
-        if arguments.app
+        subprocess.Popen(
+            command,
+            shell=True,
+            cwd=environment.get("DOUBLEBLIND_APP_CWD", "."),
+            env=environment,
+        )
+        if command
         else None
     )
     try:
@@ -129,7 +131,7 @@ def main() -> None:
             arguments.broker,
             arguments.session,
             arguments.party,
-            arguments.token,
+            token,
             arguments.target,
             arguments.wait,
         ).serve()
