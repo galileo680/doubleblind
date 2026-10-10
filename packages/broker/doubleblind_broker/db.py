@@ -28,7 +28,16 @@ class SessionRecord(SQLModel, table=True):
     observer_token_hash: str = Field(index=True)
     secrets_json: str = "{}"
     metrics_json: str = json.dumps(
-        {"cost_usd": 0.0, "tokens": 0, "code_lines_shared": 0, "blocked_count": 0}
+        {
+            "cost_usd": 0.0,
+            "tokens": 0,
+            "code_lines_shared": 0,
+            "blocked_count": 0,
+            "redacted_count": 0,
+            "bytes_brief": 0,
+            "bytes_turns": 0,
+            "bytes_results": 0,
+        }
     )
     e2e_feedback_json: str | None = None
 

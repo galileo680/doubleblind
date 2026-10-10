@@ -7,7 +7,7 @@ from typing import Any
 
 CODE_FENCE = "```"
 CODE_LINE = re.compile(
-    r"^\s*(?:(?:def|class|import|function|const|let|var|return|export)\b"
+    r"^\s*(?:(?:def|class|import|function|const|let|var|return|export|await)\b"
     r"|from\s+\S+\s+import\b|if\s*\(|for\s*\(|async\s+def\b)"
     r"|=>|;\s*$|\)\s*\{\s*$"
 )
@@ -18,6 +18,7 @@ SECRET_PATTERNS = (
     re.compile(r"NEBIUS_API_KEY"),
 )
 TOKEN_CANDIDATE = re.compile(r"[A-Za-z0-9+=_-]{32,}")
+HEX = re.compile(r"[0-9a-fA-F]+")
 DIGIT = re.compile(r"\d")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<![\w+])(?:\+48|0048)?[ -]?\d{3}[ -]?\d{3}[ -]?\d{3}(?!\w)")
@@ -26,6 +27,7 @@ STACK_TRACES = (
     re.compile(r"at .* \(.*:\d+:\d+\)"),
 )
 ENTROPY_LIMIT = 4.0
+HEX_ENTROPY_LIMIT = 3.0
 MAX_CODE_LINES = 1
 CODE_BLOCK_PATCH_PREFIXES = ("/schemas", "/operations", "/webhooks", "/scenarios")
 
@@ -108,7 +110,8 @@ def check_text(
         if pattern.search(text):
             verdict.reasons.append(f"{where}: contains a secret ({pattern.pattern[:24]}...)")
     for candidate in TOKEN_CANDIDATE.findall(text):
-        if DIGIT.search(candidate) and shannon_entropy(candidate) > ENTROPY_LIMIT:
+        limit = HEX_ENTROPY_LIMIT if HEX.fullmatch(candidate) else ENTROPY_LIMIT
+        if DIGIT.search(candidate) and shannon_entropy(candidate) > limit:
             verdict.reasons.append(f"{where}: contains a high-entropy token")
             break
     for email in EMAIL.findall(text):

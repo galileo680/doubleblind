@@ -8,7 +8,13 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
-from doubleblind_broker.service import BrokerService, ContractGapIn, TestRunIn, TurnIn
+from doubleblind_broker.service import (
+    AgentEventIn,
+    BrokerService,
+    ContractGapIn,
+    TestRunIn,
+    TurnIn,
+)
 from doubleblind_broker.tokens import Principal
 
 STREAM_POLL_S = 15.0
@@ -144,6 +150,10 @@ def build_router(service: BrokerService) -> APIRouter:
     @router.post("/sessions/{session_id}/e2e/run", status_code=202)
     async def run_e2e(session_id: str, caller: Caller) -> dict[str, Any]:
         return service.trigger_e2e(caller, session_id)
+
+    @router.post("/sessions/{session_id}/events", status_code=201)
+    async def agent_event(session_id: str, event: AgentEventIn, caller: Caller) -> dict[str, Any]:
+        return service.record_agent_event(caller, session_id, event)
 
     @router.get("/sessions/{session_id}/events")
     async def events(

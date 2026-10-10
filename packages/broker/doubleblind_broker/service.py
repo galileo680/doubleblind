@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, NoReturn, Protocol
+from typing import Annotated, Any, Literal, NoReturn, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine
@@ -126,6 +126,37 @@ class ContractGapIn(BaseModel):
 
     scenario_ids: list[str] = Field(default_factory=list)
     description: str = Field(min_length=1)
+
+
+class PsmBuiltIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["psm.built"]
+    files: int = Field(ge=0)
+    tokens: int = Field(ge=0)
+    seconds: float = Field(ge=0)
+
+
+class EgressIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["egress.blocked", "egress.redacted"]
+    kind: str = Field(max_length=40)
+    reason: str = Field(max_length=300)
+
+
+class LlmCallIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["llm.call"]
+    role: str = Field(max_length=40)
+    model: str = Field(max_length=120)
+    tokens: int = Field(ge=0)
+    cost_usd: float = Field(ge=0)
+    latency_ms: int = Field(ge=0)
+
+
+AgentEventIn = Annotated[PsmBuiltIn | EgressIn | LlmCallIn, Field(discriminator="type")]
 
 
 @dataclass
@@ -280,10 +311,10 @@ class BrokerService:
         )
         return version
 
-    def update_metrics(self, record: SessionRecord, outbox: Outbox, **changes: int) -> None:
+    def update_metrics(self, record: SessionRecord, outbox: Outbox, **changes: float) -> None:
         metrics = json.loads(record.metrics_json)
         for key, value in changes.items():
-            metrics[key] += value
+            metrics[key] = metrics.get(key, 0) + value
         record.metrics_json = json.dumps(metrics)
         outbox.add("metrics.update", "broker", metrics, "observer")
 
@@ -294,10 +325,14 @@ class BrokerService:
         verdict: GuardVerdict,
         outbox: Outbox,
         db: Session,
+        kind: str,
+        payload: Any,
     ) -> None:
         if not verdict.blocked:
-            if verdict.code_lines:
-                self.update_metrics(record, outbox, code_lines_shared=verdict.code_lines)
+            size = len(json.dumps(payload, ensure_ascii=False).encode())
+            self.update_metrics(
+                record, outbox, code_lines_shared=verdict.code_lines, **{f"bytes_{kind}": size}
+            )
             return
         self.update_metrics(record, outbox, blocked_count=1)
         outbox.add(
@@ -528,7 +563,11 @@ class BrokerService:
             if state in TERMINAL_STATES:
                 return {"action": "done", "context": {"state": state.value}}
             if state is State.BRIEFING and party.brief_json is None:
-                return {"action": "build_psm_and_brief", "context": {"role": party.role}}
+                allowlist = self.preset(record.preset).synthetic_allowlist.model_dump()
+                return {
+                    "action": "build_psm_and_brief",
+                    "context": {"role": party.role, "synthetic_allowlist": allowlist},
+                }
             if state in NEGOTIATION_STATES and record.turn_party == party.party_key:
                 return {
                     "action": "amend" if state is State.AMENDING else "negotiate",
@@ -563,7 +602,13 @@ class BrokerService:
                 raise BrokerError(409, "BRIEF_EXISTS", "the brief was already submitted")
             preset = self.preset(record.preset)
             self.guard(
-                record, party.party_key, check_message(brief, preset.allowlist()), outbox, db
+                record,
+                party.party_key,
+                check_message(brief, preset.allowlist()),
+                outbox,
+                db,
+                "brief",
+                brief,
             )
             party.brief_json = json.dumps(brief, ensure_ascii=False)
             party.status = "briefed"
@@ -616,12 +661,12 @@ class BrokerService:
             verdict = check_turn(payload, preset.allowlist())
             if verdict.blocked:
                 self.reject_turn(db, record, party, turn, verdict.reasons, outbox)
-                self.guard(record, party.party_key, verdict, outbox, db)
+                self.guard(record, party.party_key, verdict, outbox, db, "turns", payload)
             version_after = record.current_contract_version
             if turn.patches:
                 candidate = self.patched_contract(db, record, party, turn, outbox)
                 version_after = self.store_version(db, record, candidate, party.party_key, outbox)
-            self.guard(record, party.party_key, verdict, outbox, db)
+            self.guard(record, party.party_key, verdict, outbox, db, "turns", payload)
             question_ids = self.create_questions(
                 db, record, party, turn.questions_for_human, outbox
             )
@@ -990,6 +1035,8 @@ class BrokerService:
                 check_test_run(run.model_dump(exclude={"workspace_image"}), preset.allowlist()),
                 outbox,
                 db,
+                "results",
+                run.model_dump(exclude={"workspace_image"}),
             )
             if run.binding_yaml is not None:
                 self.accept_binding(party, run.binding_yaml)
@@ -1064,6 +1111,8 @@ class BrokerService:
                 check_message(gap.model_dump(), preset.allowlist()),
                 outbox,
                 db,
+                "results",
+                gap.model_dump(),
             )
             outbox.add(
                 "contract.gap",
@@ -1202,6 +1251,29 @@ class BrokerService:
                 self.record_signature(session_id, party_key, version)
             except BrokerError as error:
                 logger.warning("autopilot could not sign for %s: %s", party_key, error.message)
+
+    def record_agent_event(
+        self, principal: Principal, session_id: str, event: PsmBuiltIn | EgressIn | LlmCallIn
+    ) -> dict[str, Any]:
+        self.authorize(principal, session_id, "agent")
+        party_key = principal.party_key or ""
+        payload = {"party": party_key, **event.model_dump(exclude={"type"})}
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            if isinstance(event, PsmBuiltIn):
+                outbox.add(event.type, party_key, payload)
+            elif isinstance(event, EgressIn):
+                counter = "blocked_count" if event.type == "egress.blocked" else "redacted_count"
+                self.update_metrics(record, outbox, **{counter: 1})
+                outbox.add(event.type, party_key, payload, party_key)
+            else:
+                self.update_metrics(record, outbox, cost_usd=event.cost_usd, tokens=event.tokens)
+                outbox.add(event.type, party_key, payload, "observer")
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
+        return {"accepted": True}
 
     def events_for(
         self, principal: Principal, session_id: str, since: int = 0

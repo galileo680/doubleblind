@@ -15,4 +15,4 @@ RUN pip install \
     -e packages/sandbox \
     -e packages/agent
 
-CMD ["python", "-m", "doubleblind_agent"]
+CMD ["python", "-m", "doubleblind_agent.main"]
