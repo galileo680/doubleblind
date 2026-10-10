@@ -1,0 +1,19 @@
+name: spokes-parcelly
+contract_id: spokes-parcelly-shipping
+consumer: { party: spokes, display_name: "Spokes (bike shop)", workspace: demo/spokes }
+provider: { party: parcelly, display_name: "Parcelly (courier)", workspace: demo/parcelly }
+synthetic_allowlist:
+  phones: ["600 100 200", "+48600100200", "0048 600-100-200", "+48500200300"]
+  emails: ["jan.kowalski@example.com"]
+autopilot_answers:
+  - match: ["returned", "zwrot"]
+    answer: "tak"
+  - match: ["needs_review", "ręczn", "nieparsowal"]
+    answer: "tak, oznacz do ręcznej weryfikacji i nie wysyłaj"
+  - match: ["idempotency", "Idempotency-Key"]
+    answer: "tak, wymagaj klucza dla tego partnera"
+  - match: ["zaokrągl", "round"]
+    answer: "w górę do pełnego grama"
+personas:
+  consumer: "careful owner of an online bike shop"
+  provider: "partner onboarding manager at a courier company"

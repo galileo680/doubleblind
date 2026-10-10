@@ -140,7 +140,11 @@ def task_test() -> None:
 
 
 def task_golden() -> None:
-    run([require_venv(), "-m", "pytest", "-m", "golden", "packages/contract"])
+    run([require_venv(), "-m", "pytest", "-m", "golden", "packages/contract", "packages/broker"])
+
+
+def task_scripted_session() -> None:
+    run([require_venv(), "scripts/scripted_session.py"])
 
 
 def task_smoke_demo() -> None:
@@ -168,6 +172,7 @@ TASKS: dict[str, Callable[[], None]] = {
     "check-comments": task_check_comments,
     "smoke-demo": task_smoke_demo,
     "golden": task_golden,
+    "scripted-session": task_scripted_session,
     **{target: pending(target) for target in PENDING_TARGETS},
 }
 

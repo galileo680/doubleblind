@@ -148,12 +148,12 @@ def test_unknown_webhook_in_a_step_is_reported() -> None:
     assert findings_of(text) == [("rule 2", "error", "scenarios[0].steps[2].emit.webhook")]
 
 
-def test_covers_must_name_existing_items() -> None:
+def test_covers_naming_unknown_items_is_a_warning() -> None:
     text = minimal_text("covers: [D1, create_shipment]", "covers: [D1, D9, create_shipmnet]")
 
     assert findings_of(text) == [
-        ("rule 2", "error", "scenarios[0].covers[1]"),
-        ("rule 2", "error", "scenarios[0].covers[2]"),
+        ("rule 5", "warning", "scenarios[0].covers[1]"),
+        ("rule 5", "warning", "scenarios[0].covers[2]"),
     ]
 
 

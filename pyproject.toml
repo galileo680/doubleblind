@@ -19,7 +19,7 @@ no_implicit_optional = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages"]
-pythonpath = ["packages/llm/tests", "packages/contract/tests"]
+pythonpath = ["packages/llm/tests", "packages/contract/tests", "packages/broker/tests", "scripts"]
 addopts = "--import-mode=importlib -q -m 'not golden'"
 norecursedirs = [".*", "build", "dist", "node_modules", "venv", "*.egg", "reference_impl"]
 markers = ["golden: slow end-to-end runs of the contract runner against the reference implementations"]

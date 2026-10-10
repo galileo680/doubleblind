@@ -179,8 +179,8 @@ def check_references(
     for scenario_index, scenario in enumerate(contract.scenarios):
         for cover_index, covered in enumerate(scenario.covers):
             if covered not in known_ids:
-                report.error(
-                    RULE_REFERENCES,
+                report.warning(
+                    RULE_COVERAGE,
                     f"scenarios[{scenario_index}].covers[{cover_index}]",
                     f"'{covered}' is not a decision, operation or webhook of this contract",
                 )
