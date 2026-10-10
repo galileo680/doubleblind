@@ -5,7 +5,13 @@ from typing import Any
 from doubleblind_agent.broker_client import BrokerClient, BrokerRejectedError
 from doubleblind_agent.models import ClassifierVerdict
 from doubleblind_agent.prompts import EGRESS_CLASSIFIER
-from doubleblind_contract.guard_rules import SyntheticAllowlist, check_message, redact
+from doubleblind_contract.guard_rules import (
+    GuardVerdict,
+    SyntheticAllowlist,
+    check_message,
+    check_turn,
+    redact,
+)
 from doubleblind_llm import LLMClient, LLMRequest, Role
 
 MAX_ATTEMPTS = 3
@@ -26,6 +32,18 @@ def redact_value(value: Any, redactions: Sequence[tuple[str, str]]) -> Any:
     if isinstance(value, list):
         return [redact_value(item, redactions) for item in value]
     return value
+
+
+def redact_free_text(
+    kind: str, payload: dict[str, Any], redactions: Sequence[tuple[str, str]]
+) -> dict[str, Any]:
+    if kind != "turns":
+        return dict(redact_value(payload, redactions))
+    return {
+        **payload,
+        "message": redact(payload["message"], redactions),
+        "questions_for_human": redact_value(payload["questions_for_human"], redactions),
+    }
 
 
 async def classify(llm: LLMClient, payload: Any, party: str) -> ClassifierVerdict:
@@ -62,11 +80,16 @@ class EgressGuard:
         reason = "; ".join(reasons)[:300] or event_type
         await self.broker.post_event({"type": event_type, "kind": kind, "reason": reason})
 
+    def check(self, kind: str, payload: dict[str, Any]) -> GuardVerdict:
+        if kind == "turns":
+            return check_turn(payload, self.allowlist, self.repo_paths)
+        return check_message(payload, self.allowlist, self.repo_paths)
+
     async def send(self, kind: str, build: Builder, send: Sender) -> Any:
         feedback: list[str] = []
         for _ in range(MAX_ATTEMPTS):
             payload = await build(feedback)
-            verdict = check_message(payload, self.allowlist, self.repo_paths)
+            verdict = self.check(kind, payload)
             if verdict.blocked:
                 await self.report("egress.blocked", kind, verdict.reasons)
                 feedback = verdict.reasons
@@ -79,8 +102,9 @@ class EgressGuard:
                 continue
             redactions = [*verdict.redactions]
             if classified.verdict == "redact":
-                redactions += [(item.text, item.replacement) for item in classified.redactions]
-                payload = redact_value(payload, redactions)
+                found = [(item.text, item.replacement) for item in classified.redactions]
+                redactions += found
+                payload = redact_free_text(kind, payload, found)
             if redactions:
                 await self.report(
                     "egress.redacted", kind, [f"{len(redactions)} fragments redacted"]

@@ -1,0 +1,183 @@
+doubleblind: "1.0"
+id: inkwell-printhouse-jobs
+version: 4
+status: proposed
+parties:
+  consumer: { id: inkwell, name: "Inkwell (bookshop)" }
+  provider: { id: printhouse, name: "PrintHouse (print on demand)" }
+environments:
+  provider_base_url: "${PROVIDER_BASE_URL}"
+  consumer_webhook_url: "${CONSUMER_WEBHOOK_URL}"
+secrets:
+  - { name: partner_api_key, description: "Bearer key of the consumer at the provider" }
+  - { name: webhook_secret, description: "HMAC key for webhook signatures" }
+glossary:
+  print job: "One book printed and shipped for one paid order"
+schemas:
+  CreateJobRequest:
+    type: object
+    required: [reference, title, pages]
+    additionalProperties: false
+    properties:
+      reference: { type: string }
+      title: { type: string }
+      pages: { type: integer, minimum: 24, maximum: 800 }
+      cover: { enum: [SOFT, HARD] }
+  Job:
+    type: object
+    required: [id, reference, status]
+    properties:
+      id: { type: string }
+      reference: { type: string }
+      status: { enum: [QUEUED, PRINTING, SHIPPED] }
+  Error:
+    type: object
+    required: [code, message]
+    properties:
+      code: { type: string }
+      message: { type: string }
+  JobStatusChanged:
+    type: object
+    required: [job_id, reference, status]
+    properties:
+      job_id: { type: string }
+      reference: { type: string }
+      status: { enum: [QUEUED, PRINTING, SHIPPED] }
+operations:
+  create_job:
+    description: "Queue a print job for a paid order"
+    direction: consumer_to_provider
+    request:
+      method: POST
+      path: /v1/jobs
+      headers:
+        Authorization: { required: true, pattern: "^Bearer .+$" }
+        Idempotency-Key: { required: true }
+      body: { $ref: "#/schemas/CreateJobRequest" }
+    responses:
+      "201": { body: { $ref: "#/schemas/Job" } }
+      "422": { body: { $ref: "#/schemas/Error" } }
+    stub:
+      default_status: 201
+      body:
+        id: "job_{{seq}}"
+        reference: "{{request.body.reference}}"
+        status: QUEUED
+      idempotent_on_header: Idempotency-Key
+webhooks:
+  job_status_changed:
+    description: "The job moved to a new status"
+    direction: provider_to_consumer
+    request:
+      method: POST
+      url: "${CONSUMER_WEBHOOK_URL}"
+      headers:
+        X-Signature: { required: true, pattern: "^sha256=[0-9a-f]{64}$" }
+      body: { $ref: "#/schemas/JobStatusChanged" }
+    signature:
+      algorithm: hmac-sha256
+      header: X-Signature
+      format: "sha256={hex}"
+      over: raw_body
+      secret: webhook_secret
+    consumer_responses: { valid_signature: 200, invalid_signature: 401 }
+semantic_mappings:
+  job_status_to_order_status: { QUEUED: paid, PRINTING: paid, SHIPPED: shipped }
+decisions:
+  - { id: D1, text: "The consumer sends the page count as an integer between 24 and 800; shorter books are padded.", owner: consumer }
+  - { id: D2, text: "The order id is both the job reference and the Idempotency-Key.", owner: consumer }
+  - { id: D3, text: "The provider rejects page counts outside 24-800 with 422 PAGES_OUT_OF_RANGE.", owner: provider }
+scenarios:
+  - id: S1
+    title: "Paying an order of a 120-page book queues one print job"
+    side: consumer
+    covers: [D1, D2, create_job]
+    steps:
+      - do: { party: consumer, action: reset }
+      - do: { party: consumer, action: create_order, args: { title: "Sea Tales", pages: 120 } }
+      - do: { party: consumer, action: pay_order }
+      - expect_received:
+          operation: create_job
+          count: 1
+          within_s: 5
+          match:
+            headers.Idempotency-Key: "{{ctx.order_id}}"
+            body.reference: "{{ctx.order_id}}"
+            body.pages: 120
+  - id: S2
+    title: "A signed SHIPPED webhook marks the order shipped"
+    side: consumer
+    covers: [job_status_changed]
+    steps:
+      - do: { party: consumer, action: reset }
+      - do: { party: consumer, action: create_order, args: { title: "Sea Tales", pages: 120 } }
+      - emit:
+          webhook: job_status_changed
+          body: { job_id: job_1, reference: "{{ctx.order_id}}", status: SHIPPED }
+          signature: valid
+          expect: { status: 200 }
+      - expect_state:
+          party: consumer
+          query: order
+          match: { status: shipped }
+  - id: P1
+    title: "A valid job is queued and the same Idempotency-Key returns the same job"
+    side: provider
+    covers: [create_job]
+    steps:
+      - do: { party: provider, action: reset }
+      - send:
+          operation: create_job
+          headers: { Authorization: "Bearer {{secrets.partner_api_key}}", Idempotency-Key: "ORD-1" }
+          body: { reference: ORD-1, title: "Sea Tales", pages: 120 }
+          expect: { status: 201, match: { body.status: QUEUED } }
+          capture: { job_id: "$.id" }
+      - send:
+          operation: create_job
+          headers: { Authorization: "Bearer {{secrets.partner_api_key}}", Idempotency-Key: "ORD-1" }
+          body: { reference: ORD-1, title: "Sea Tales", pages: 120 }
+          expect: { status: 201, match: { body.id: "{{ctx.job_id}}" } }
+  - id: P2
+    title: "Too few pages are rejected"
+    side: provider
+    covers: [D3]
+    steps:
+      - do: { party: provider, action: reset }
+      - send:
+          operation: create_job
+          headers: { Authorization: "Bearer {{secrets.partner_api_key}}", Idempotency-Key: "ORD-2" }
+          body: { reference: ORD-2, title: "Leaflet", pages: 8 }
+          expect: { status: 422, match: { body.code: PAGES_OUT_OF_RANGE } }
+  - id: P3
+    title: "Advancing a job emits a signed webhook"
+    side: provider
+    covers: [job_status_changed]
+    steps:
+      - do: { party: provider, action: reset }
+      - send:
+          operation: create_job
+          headers: { Authorization: "Bearer {{secrets.partner_api_key}}", Idempotency-Key: "ORD-3" }
+          body: { reference: ORD-3, title: "Sea Tales", pages: 120 }
+          expect: { status: 201 }
+          capture: { job_id: "$.id" }
+      - do: { party: provider, action: advance_job, args: { to: SHIPPED } }
+      - expect_emitted:
+          webhook: job_status_changed
+          signature: valid
+          within_s: 5
+          match: { body.status: SHIPPED, body.reference: ORD-3 }
+  - id: E1
+    title: "Paid order is printed and shipped end to end"
+    side: e2e
+    covers: [D2, create_job, job_status_changed]
+    steps:
+      - do: { party: provider, action: reset }
+      - do: { party: consumer, action: reset }
+      - do: { party: consumer, action: create_order, args: { title: "Sea Tales", pages: 120 } }
+      - do: { party: consumer, action: pay_order }
+      - do: { party: provider, action: advance_job_by_reference, args: { reference: "{{ctx.order_id}}", to: SHIPPED } }
+      - expect_state:
+          party: consumer
+          query: order
+          match: { status: shipped }
+          eventually: { timeout_s: 10, interval_s: 0.5 }

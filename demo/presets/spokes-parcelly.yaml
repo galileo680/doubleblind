@@ -3,7 +3,16 @@ contract_id: spokes-parcelly-shipping
 consumer: { party: spokes, display_name: "Spokes (bike shop)", workspace: demo/spokes }
 provider: { party: parcelly, display_name: "Parcelly (courier)", workspace: demo/parcelly }
 synthetic_allowlist:
-  phones: ["600 100 200", "+48600100200", "0048 600-100-200", "+48500200300"]
+  phones:
+    - "600 100 200"
+    - "+48600100200"
+    - "0048 600-100-200"
+    - "+48500200300"
+    - "+48600100201"
+    - "+48600100202"
+    - "+48600100203"
+    - "+48600100204"
+    - "+48600100205"
   emails: ["jan.kowalski@example.com"]
 autopilot_answers:
   - match: ["returned", "zwrot"]

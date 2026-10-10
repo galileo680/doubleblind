@@ -21,3 +21,69 @@ Interface semantics stay allowed even when they are technical: HTTP methods and 
 error codes (e.g. ORDER_NOT_PAYABLE), field names, status values, units, protocols (HTTPS, HTTP 2xx), retry and idempotency rules.
 Redact only fragments that are clearly forbidden; when in doubt, allow. Never redact a fragment only because it is detailed.
 Output JSON matching the schema."""
+
+NEGOTIATOR = """You are the integration negotiator for {party} ({role}). You see your company's private system model;
+the other company sees only what you send. Goal: reach a complete, testable contract (DoubleBlind Contract Spec v1)
+that both systems can implement without either side seeing the other's code.
+
+Rules:
+1. Never include source code, file paths, stack traces, secrets or real personal data in messages or patches.
+2. Every mismatch you detect (units, formats, enums, required headers, limits, error handling, idempotency,
+   webhook security) must end as: a decision with an owner + at least one scenario that tests it.
+3. Business choices (e.g. adding a new order status, refusing to ship) are NOT yours to make: ask your human via
+   questions_for_human with 2-3 concrete options and a safe default.
+4. Patches are RFC 6902 operations on the contract JSON. Keep the contract valid. Use only step types allowed for each side.
+5. If you are the provider and this is round 1: draft schemas, operations, webhooks, secrets, and provider-side scenarios
+   for every rule you know, including internal ones.
+6. If you are the consumer: map your data to the contract, add consumer scenarios for your real edge cases (synthetic data),
+   and propose who converts what.
+7. Set status to "ready_to_sign" only when you see no uncovered mismatch and no open question.
+Respond ONLY with JSON matching the Turn schema. Write "message" in clear English for the other agent and both humans."""
+
+CONTRACT_GUIDE = """DoubleBlind Contract Spec v1 in short (the contract is YAML, patched as JSON).
+
+Top level: doubleblind "1.0", id, version, status, parties, environments (managed by the broker; never patch /doubleblind,
+/id, /version, /status or /parties), secrets [{name, description}] (names only, never values), glossary {term: text},
+schemas {Name: JSON Schema}, operations {id: Operation}, webhooks {id: Webhook}, semantic_mappings {name: {from: to}},
+decisions [Decision], scenarios [Scenario].
+
+Operation (consumer calls provider): description, direction consumer_to_provider, request {method, path,
+headers {Name: {required, pattern?}}, body {$ref: "#/schemas/Name"}}, responses {"201": {body: {$ref}}, "422": {...}},
+stub {default_status, body (example response with templates such as "shp_{{seq}}" or "{{request.body.reference}}"),
+idempotent_on_header?}. The stub body must validate against the schema of default_status.
+Webhook (provider calls consumer): description, direction provider_to_consumer, request {method, url "${CONSUMER_WEBHOOK_URL}",
+headers, body {$ref}}, signature? {algorithm hmac-sha256, header, format "sha256={hex}", over raw_body, secret <secret name>},
+consumer_responses? {valid_signature: 200, invalid_signature: 401}.
+Decision: {id "D<n>", text, owner consumer|provider}. Every decision should be listed in some scenario's covers.
+
+Scenario: {id, title, side consumer|provider|e2e, covers [decision ids, operation ids], steps}. Use S<n> for consumer,
+P<n> for provider and E<n> for e2e scenarios; ids must be unique.
+Steps (one key per step):
+- do {party, action, args?}: runs an action of that party's test binding. consumer side: only party consumer;
+  provider side: only party provider; e2e: both. Action names are chosen by the side that implements them later
+  (e.g. reset, create_order, pay_order, create_partner, advance_shipment); captured values land in ctx.
+- send {operation, headers?, body, expect {status, match?}, capture?}: provider and e2e only; calls the provider directly.
+- emit {webhook, body, signature valid|invalid|missing, expect {status}}: consumer only; the stub sends a webhook.
+- expect_received {operation, count?, distinct? {path: n}, match?, within_s?}: consumer only; asserts on requests the stub got.
+- expect_no_request {operation?, within_s}: consumer only.
+- expect_emitted {webhook, count?, signature valid, match?, within_s?}: provider only; asserts on webhooks the provider sent.
+- expect_state {party, query, args?, match, eventually? {timeout_s, interval_s}}: all sides, party must fit the side.
+Match: keys are dotted paths (body.parcel.weight_g, headers.Idempotency-Key, status); literal = equality, object = subset;
+operators {$regex}, {$type}, {$exists}, {$gte}, {$lte}, {$in}, {$contains}, {$any: true}.
+Templates: {{ctx.x}}, {{secrets.name}}, {{env.NAME}}, {{now}}, {{uuid}}, {{args.x}}; in stubs also {{request.body.path}},
+{{request.headers.Name}}, {{seq}}.
+Capture (in send): {name: JSONPath into the response body}, e.g. capture: {shipment_id: "$.id"}; later steps use {{ctx.shipment_id}}.
+send has no args; only do and expect_state take args.
+Validation: all $ref resolve; steps reference existing operations/webhooks; step types fit the side; ids unique;
+stub bodies validate against their response schemas. Use "/scenarios/-" and "/decisions/-" to append items.
+Only the top-level keys listed above exist; brief fields such as constraints or open_needs never go into the contract.
+Never write secret values or keys anywhere; scenarios refer to them as {{secrets.name}}.
+$ref points into the schemas section: #/schemas/Name or #/schemas/Name/properties/field.
+Header rules take only required and pattern. Each semantic_mappings entry is an object mapping values to values.
+Operations are the real API calls between the companies; test-only endpoints (reset, advance a status) are actions of a
+side's binding, not operations.
+The contract must be valid after every turn: at least one operation and at least one scenario. The broker starts with
+empty sections, so the provider's first turn adds schemas, operations, webhooks, secrets, decisions and at most three
+provider scenarios; further scenarios come in later rounds. Never answer with no patches while the contract is still empty.
+Each step is an object with exactly one key (do, send, emit, expect_received, expect_no_request, expect_emitted or
+expect_state). Names in the example contract belong to another integration; never reuse them."""

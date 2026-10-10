@@ -1,6 +1,8 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+BROKER_FIELDS = frozenset({"doubleblind", "id", "version", "status", "parties"})
 
 
 class Model(BaseModel):
@@ -95,3 +97,29 @@ class ClassifierVerdict(Model):
     verdict: Literal["allow", "redact", "block"]
     reasons: list[str]
     redactions: list[Redaction]
+
+
+class Patch(Model):
+    op: Literal["add", "remove", "replace"]
+    path: str
+    value: Any = None
+
+
+class HumanQuestion(Model):
+    text: str
+    options: list[str]
+    default: str
+
+
+class Turn(Model):
+    message: str
+    patches: list[Patch]
+    questions_for_human: list[HumanQuestion]
+    status: Literal["continue", "ready_to_sign"]
+
+    def patch_list(self) -> list[dict[str, Any]]:
+        return [
+            patch.model_dump(exclude_none=patch.op == "remove")
+            for patch in self.patches
+            if patch.path.partition("/")[2].split("/")[0] not in BROKER_FIELDS
+        ]

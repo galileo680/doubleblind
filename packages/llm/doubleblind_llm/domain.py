@@ -10,6 +10,7 @@ class Role(StrEnum):
     PSM = "psm"
     BRIEF = "brief"
     NEGOTIATOR = "negotiator"
+    NEGOTIATOR_FIX = "negotiator_fix"
     CODER = "coder"
     TRIAGE = "triage"
     GUARD = "guard"

@@ -568,7 +568,11 @@ class BrokerService:
                     "action": "build_psm_and_brief",
                     "context": {"role": party.role, "synthetic_allowlist": allowlist},
                 }
-            if state in NEGOTIATION_STATES and record.turn_party == party.party_key:
+            if (
+                state in NEGOTIATION_STATES
+                and record.turn_party == party.party_key
+                and not self.unanswered_questions(db, session_id)
+            ):
                 return {
                     "action": "amend" if state is State.AMENDING else "negotiate",
                     "context": {

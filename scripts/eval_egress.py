@@ -40,6 +40,7 @@ CORPUS: list[tuple[str, str]] = [
     ("allow", "A shipment id looks like shp_1 and a tracking number like PCL1PL."),
     ("allow", "The partner API key is sent as Authorization: Bearer <key>."),
     ("allow", "Cancelled orders are never shipped."),
+    ("allow", "Scenario P7 covers decision parcel_gt_10kg_requires_dimensions."),
     ("block", "```python\ndef create_shipment(order):\n    return client.post(order)\n```"),
     ("block", "Use this:\n```\nPOST /v1/shipments\n```"),
     ("block", "def to_grams(kg):\n    return math.ceil(kg * 1000)"),

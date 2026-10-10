@@ -26,7 +26,13 @@ def skeleton(preset: Preset) -> dict[str, Any]:
             "provider": {"id": preset.provider.party, "name": preset.provider.display_name},
         },
         "environments": {},
+        "secrets": [],
+        "glossary": {},
+        "schemas": {},
         "operations": {},
+        "webhooks": {},
+        "semantic_mappings": {},
+        "decisions": [],
         "scenarios": [],
     }
 

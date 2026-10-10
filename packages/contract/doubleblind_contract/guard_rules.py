@@ -19,6 +19,8 @@ SECRET_PATTERNS = (
 )
 TOKEN_CANDIDATE = re.compile(r"[A-Za-z0-9+=_-]{32,}")
 HEX = re.compile(r"[0-9a-fA-F]+")
+WORD_SEPARATOR = re.compile(r"[_-]")
+MIN_RANDOM_SEGMENT = 20
 DIGIT = re.compile(r"\d")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<![\w+])(?:\+48|0048)?[ -]?\d{3}[ -]?\d{3}[ -]?\d{3}(?!\w)")
@@ -110,6 +112,8 @@ def check_text(
         if pattern.search(text):
             verdict.reasons.append(f"{where}: contains a secret ({pattern.pattern[:24]}...)")
     for candidate in TOKEN_CANDIDATE.findall(text):
+        if max(len(segment) for segment in WORD_SEPARATOR.split(candidate)) < MIN_RANDOM_SEGMENT:
+            continue
         limit = HEX_ENTROPY_LIMIT if HEX.fullmatch(candidate) else ENTROPY_LIMIT
         if DIGIT.search(candidate) and shannon_entropy(candidate) > limit:
             verdict.reasons.append(f"{where}: contains a high-entropy token")

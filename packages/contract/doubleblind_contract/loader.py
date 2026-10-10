@@ -131,17 +131,26 @@ class RefResolver:
                 )
             )
             return None
-        name = reference.removeprefix(SCHEMA_REF_PREFIX)
+        name, _, pointer = reference.removeprefix(SCHEMA_REF_PREFIX).partition("/")
+        missing = Problem(location, f"$ref '{reference}' points to a schema that does not exist")
         if name not in self.schemas:
-            self.problems.append(
-                Problem(location, f"$ref '{reference}' points to a schema that does not exist")
-            )
+            self.problems.append(missing)
             return None
         if name in self.in_progress:
             cycle = " -> ".join([*self.in_progress[self.in_progress.index(name) :], name])
             self.problems.append(Problem(location, f"$ref '{reference}' is circular: {cycle}"))
             return None
-        return deepcopy(self.schema(name))
+        target = self.schema(name)
+        for part in pointer.split("/") if pointer else []:
+            key = part.replace("~1", "/").replace("~0", "~")
+            if isinstance(target, Mapping) and key in target:
+                target = target[key]
+            elif isinstance(target, list) and key.isdigit() and int(key) < len(target):
+                target = target[int(key)]
+            else:
+                self.problems.append(missing)
+                return None
+        return deepcopy(target)
 
 
 def resolve_refs(data: Mapping[str, Any]) -> dict[str, Any]:
