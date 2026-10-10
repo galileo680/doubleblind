@@ -1,0 +1,84 @@
+doubleblind: "1.0"
+id: minimal-shipping
+version: 1
+status: draft
+parties:
+  consumer: { id: shop, name: "Shop" }
+  provider: { id: courier, name: "Courier" }
+environments:
+  provider_base_url: "${PROVIDER_BASE_URL}"
+  consumer_webhook_url: "${CONSUMER_WEBHOOK_URL}"
+secrets:
+  - { name: partner_api_key, description: "API key issued by the courier" }
+  - { name: webhook_secret, description: "HMAC secret for webhooks" }
+schemas:
+  CreateShipmentRequest:
+    type: object
+    required: [reference, weight_g]
+    additionalProperties: false
+    properties:
+      reference: { type: string, minLength: 1 }
+      weight_g: { type: integer, minimum: 1 }
+  Shipment:
+    type: object
+    required: [id, reference, status]
+    properties:
+      id: { type: string }
+      reference: { type: string }
+      status: { enum: [CREATED, DELIVERED] }
+      price_gr: { type: integer }
+  StatusChanged:
+    type: object
+    required: [event, shipment_id, status]
+    properties:
+      event: { const: shipment.status_changed }
+      shipment_id: { type: string }
+      status: { enum: [CREATED, DELIVERED] }
+operations:
+  create_shipment:
+    description: "Create a shipment"
+    direction: consumer_to_provider
+    request:
+      method: POST
+      path: /v1/shipments
+      headers:
+        Authorization: { required: true, pattern: "^Bearer .+$" }
+      body: { $ref: "#/schemas/CreateShipmentRequest" }
+    responses:
+      "201": { body: { $ref: "#/schemas/Shipmnet" } }
+    stub:
+      default_status: 201
+      body: { id: "shp_{{seq}}", reference: "{{request.body.reference}}", status: CREATED, price_gr: 1599 }
+webhooks:
+  status_changed:
+    direction: provider_to_consumer
+    request:
+      method: POST
+      url: "${CONSUMER_WEBHOOK_URL}"
+      headers:
+        X-Signature: { required: true, pattern: "^sha256=[0-9a-f]{64}$" }
+      body: { $ref: "#/schemas/StatusChanged" }
+    signature: { algorithm: hmac-sha256, header: X-Signature, format: "sha256={hex}", over: raw_body, secret: webhook_secret }
+    consumer_responses: { valid_signature: 200, invalid_signature: 401 }
+decisions:
+  - { id: D1, text: "The shop sends the weight in grams.", owner: consumer }
+scenarios:
+  - id: S1
+    title: "Paid order creates one shipment"
+    side: consumer
+    covers: [D1, create_shipment]
+    steps:
+      - do: { party: consumer, action: create_order, args: { weight_kg: 1.5 } }
+      - do: { party: consumer, action: pay_order }
+      - expect_received: { operation: create_shipment, count: 1, within_s: 5, match: { body.weight_g: 1500 } }
+  - id: P1
+    title: "Courier accepts a shipment"
+    side: provider
+    covers: [create_shipment]
+    steps:
+      - do: { party: provider, action: reset }
+      - send:
+          operation: create_shipment
+          headers: { Authorization: "Bearer {{secrets.partner_api_key}}" }
+          body: { reference: "ORD-1", weight_g: 1500 }
+          expect: { status: 201, match: { body.reference: "ORD-1" } }

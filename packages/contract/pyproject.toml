@@ -20,5 +20,8 @@ dependencies = [
   "rich>=13.8",
 ]
 
+[project.scripts]
+db-contract = "doubleblind_contract.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["doubleblind_contract"]

@@ -1,0 +1,370 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DoubleBlind Contract 1.0",
+  "type": "object",
+  "required": [
+    "doubleblind",
+    "id",
+    "version",
+    "status",
+    "parties",
+    "environments",
+    "operations",
+    "scenarios"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "doubleblind": { "const": "1.0" },
+    "id": { "$ref": "#/$defs/slug" },
+    "version": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["draft", "proposed", "signed"] },
+    "parties": {
+      "type": "object",
+      "required": ["consumer", "provider"],
+      "additionalProperties": false,
+      "properties": {
+        "consumer": { "$ref": "#/$defs/party" },
+        "provider": { "$ref": "#/$defs/party" }
+      }
+    },
+    "environments": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "secrets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/secret" }
+    },
+    "glossary": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "schemas": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/schemaName" },
+      "additionalProperties": { "$ref": "#/$defs/dataSchema" }
+    },
+    "operations": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/snakeId" },
+      "additionalProperties": { "$ref": "#/$defs/operation" }
+    },
+    "webhooks": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/snakeId" },
+      "additionalProperties": { "$ref": "#/$defs/webhook" }
+    },
+    "semantic_mappings": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/snakeId" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "string" }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/decision" }
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/scenario" }
+    }
+  },
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
+    "snakeId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "upperId": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9_-]*$" },
+    "schemaName": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$" },
+    "headerName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$" },
+    "nonEmptyText": { "type": "string", "minLength": 1 },
+    "httpMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+    "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
+    "seconds": { "type": "number", "exclusiveMinimum": 0 },
+    "partyRole": { "enum": ["consumer", "provider"] },
+    "dataSchema": { "type": ["object", "boolean"] },
+    "match": { "type": "object" },
+    "party": {
+      "type": "object",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/slug" },
+        "name": { "$ref": "#/$defs/nonEmptyText" }
+      }
+    },
+    "secret": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/snakeId" },
+        "description": { "type": "string" }
+      }
+    },
+    "headerRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "boolean" },
+        "pattern": { "type": "string" }
+      }
+    },
+    "headerRules": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/headerName" },
+      "additionalProperties": { "$ref": "#/$defs/headerRule" }
+    },
+    "operationRequest": {
+      "type": "object",
+      "required": ["method", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "$ref": "#/$defs/httpMethod" },
+        "path": { "type": "string", "pattern": "^/" },
+        "headers": { "$ref": "#/$defs/headerRules" },
+        "body": { "$ref": "#/$defs/dataSchema" }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "body": { "$ref": "#/$defs/dataSchema" }
+      }
+    },
+    "stub": {
+      "type": "object",
+      "required": ["default_status"],
+      "additionalProperties": false,
+      "properties": {
+        "default_status": { "$ref": "#/$defs/httpStatus" },
+        "body": true,
+        "idempotent_on_header": { "$ref": "#/$defs/headerName" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "required": ["direction", "request", "responses"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "direction": { "const": "consumer_to_provider" },
+        "request": { "$ref": "#/$defs/operationRequest" },
+        "responses": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[1-5][0-9]{2}$" },
+          "additionalProperties": { "$ref": "#/$defs/response" }
+        },
+        "stub": { "$ref": "#/$defs/stub" }
+      }
+    },
+    "webhookRequest": {
+      "type": "object",
+      "required": ["method", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "$ref": "#/$defs/httpMethod" },
+        "url": { "$ref": "#/$defs/nonEmptyText" },
+        "headers": { "$ref": "#/$defs/headerRules" },
+        "body": { "$ref": "#/$defs/dataSchema" }
+      }
+    },
+    "webhookSignature": {
+      "type": "object",
+      "required": ["algorithm", "header", "format", "over", "secret"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "const": "hmac-sha256" },
+        "header": { "$ref": "#/$defs/headerName" },
+        "format": { "type": "string", "pattern": "\\{hex\\}" },
+        "over": { "const": "raw_body" },
+        "secret": { "$ref": "#/$defs/snakeId" }
+      }
+    },
+    "consumerResponses": {
+      "type": "object",
+      "required": ["valid_signature", "invalid_signature"],
+      "additionalProperties": false,
+      "properties": {
+        "valid_signature": { "$ref": "#/$defs/httpStatus" },
+        "invalid_signature": { "$ref": "#/$defs/httpStatus" }
+      }
+    },
+    "webhook": {
+      "type": "object",
+      "required": ["direction", "request"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "direction": { "const": "provider_to_consumer" },
+        "request": { "$ref": "#/$defs/webhookRequest" },
+        "signature": { "$ref": "#/$defs/webhookSignature" },
+        "consumer_responses": { "$ref": "#/$defs/consumerResponses" }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["id", "text", "owner"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/upperId" },
+        "text": { "$ref": "#/$defs/nonEmptyText" },
+        "owner": { "$ref": "#/$defs/partyRole" },
+        "origin_question": { "$ref": "#/$defs/upperId" },
+        "approved_by": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/slug" }
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["id", "title", "side", "steps"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/upperId" },
+        "title": { "$ref": "#/$defs/nonEmptyText" },
+        "side": { "enum": ["consumer", "provider", "e2e"] },
+        "covers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyText" }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "do": { "$ref": "#/$defs/doStep" },
+        "send": { "$ref": "#/$defs/sendStep" },
+        "emit": { "$ref": "#/$defs/emitStep" },
+        "expect_received": { "$ref": "#/$defs/expectReceivedStep" },
+        "expect_no_request": { "$ref": "#/$defs/expectNoRequestStep" },
+        "expect_emitted": { "$ref": "#/$defs/expectEmittedStep" },
+        "expect_state": { "$ref": "#/$defs/expectStateStep" }
+      }
+    },
+    "doStep": {
+      "type": "object",
+      "required": ["party", "action"],
+      "additionalProperties": false,
+      "properties": {
+        "party": { "$ref": "#/$defs/partyRole" },
+        "action": { "$ref": "#/$defs/snakeId" },
+        "args": { "type": "object" }
+      }
+    },
+    "sendStep": {
+      "type": "object",
+      "required": ["operation", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "operation": { "$ref": "#/$defs/snakeId" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": true,
+        "expect": {
+          "type": "object",
+          "required": ["status"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "$ref": "#/$defs/httpStatus" },
+            "match": { "$ref": "#/$defs/match" }
+          }
+        },
+        "capture": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/snakeId" },
+          "additionalProperties": { "type": "string", "pattern": "^\\$" }
+        }
+      }
+    },
+    "emitStep": {
+      "type": "object",
+      "required": ["webhook", "body", "signature", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "webhook": { "$ref": "#/$defs/snakeId" },
+        "body": true,
+        "signature": { "enum": ["valid", "invalid", "missing"] },
+        "expect": {
+          "type": "object",
+          "required": ["status"],
+          "additionalProperties": false,
+          "properties": {
+            "status": { "$ref": "#/$defs/httpStatus" }
+          }
+        }
+      }
+    },
+    "expectReceivedStep": {
+      "type": "object",
+      "required": ["operation"],
+      "additionalProperties": false,
+      "properties": {
+        "operation": { "$ref": "#/$defs/snakeId" },
+        "count": { "type": "integer", "minimum": 0 },
+        "distinct": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        },
+        "match": { "$ref": "#/$defs/match" },
+        "within_s": { "$ref": "#/$defs/seconds" }
+      }
+    },
+    "expectNoRequestStep": {
+      "type": "object",
+      "required": ["within_s"],
+      "additionalProperties": false,
+      "properties": {
+        "operation": { "$ref": "#/$defs/snakeId" },
+        "within_s": { "$ref": "#/$defs/seconds" }
+      }
+    },
+    "expectEmittedStep": {
+      "type": "object",
+      "required": ["webhook"],
+      "additionalProperties": false,
+      "properties": {
+        "webhook": { "$ref": "#/$defs/snakeId" },
+        "count": { "type": "integer", "minimum": 0 },
+        "signature": { "const": "valid" },
+        "match": { "$ref": "#/$defs/match" },
+        "within_s": { "$ref": "#/$defs/seconds" }
+      }
+    },
+    "expectStateStep": {
+      "type": "object",
+      "required": ["party", "query", "match"],
+      "additionalProperties": false,
+      "properties": {
+        "party": { "$ref": "#/$defs/partyRole" },
+        "query": { "$ref": "#/$defs/snakeId" },
+        "args": { "type": "object" },
+        "match": { "$ref": "#/$defs/match" },
+        "eventually": {
+          "type": "object",
+          "required": ["timeout_s", "interval_s"],
+          "additionalProperties": false,
+          "properties": {
+            "timeout_s": { "$ref": "#/$defs/seconds" },
+            "interval_s": { "$ref": "#/$defs/seconds" }
+          }
+        }
+      }
+    }
+  }
+}

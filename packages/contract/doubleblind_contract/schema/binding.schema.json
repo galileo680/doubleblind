@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DoubleBlind Binding 1.0",
+  "type": "object",
+  "required": ["doubleblind_binding", "side", "base_url", "actions"],
+  "additionalProperties": false,
+  "properties": {
+    "doubleblind_binding": { "const": "1.0" },
+    "side": { "enum": ["consumer", "provider"] },
+    "base_url": { "$ref": "#/$defs/nonEmptyText" },
+    "webhook_receiver_url": { "$ref": "#/$defs/nonEmptyText" },
+    "app": { "$ref": "#/$defs/app" },
+    "actions": { "$ref": "#/$defs/httpCalls" },
+    "queries": { "$ref": "#/$defs/httpCalls" }
+  },
+  "if": {
+    "required": ["side"],
+    "properties": { "side": { "const": "consumer" } }
+  },
+  "then": { "required": ["webhook_receiver_url"] },
+  "$defs": {
+    "snakeId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "nonEmptyText": { "type": "string", "minLength": 1 },
+    "httpMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+    "requestPath": { "type": "string", "pattern": "^/" },
+    "textMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "app": {
+      "type": "object",
+      "required": ["manage"],
+      "additionalProperties": false,
+      "properties": {
+        "manage": { "type": "boolean" },
+        "start": { "$ref": "#/$defs/nonEmptyText" },
+        "cwd": { "type": "string" },
+        "env": { "$ref": "#/$defs/textMap" },
+        "healthcheck": {
+          "type": "object",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": {
+            "method": { "$ref": "#/$defs/httpMethod" },
+            "path": { "$ref": "#/$defs/requestPath" }
+          }
+        }
+      },
+      "if": {
+        "required": ["manage"],
+        "properties": { "manage": { "const": true } }
+      },
+      "then": { "required": ["start"] }
+    },
+    "httpCalls": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/snakeId" },
+      "additionalProperties": { "$ref": "#/$defs/httpCall" }
+    },
+    "httpCall": {
+      "type": "object",
+      "required": ["method", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "$ref": "#/$defs/httpMethod" },
+        "path": { "$ref": "#/$defs/requestPath" },
+        "headers": { "$ref": "#/$defs/textMap" },
+        "query": { "$ref": "#/$defs/textMap" },
+        "body": true,
+        "capture": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/snakeId" },
+          "additionalProperties": { "type": "string", "pattern": "^\\$" }
+        }
+      }
+    }
+  }
+}

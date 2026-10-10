@@ -1,0 +1,42 @@
+doubleblind_binding: "1.0"
+side: provider
+base_url: "${PROVIDER_BASE_URL}"
+app:
+  manage: true
+  start: "node src/server.js"
+  cwd: "."
+  env:
+    PORT: "8080"
+    HOST: "127.0.0.1"
+    SANDBOX: "1"
+  healthcheck: { path: /health }
+actions:
+  reset: { method: POST, path: /__sandbox/reset }
+  create_partner:
+    method: POST
+    path: /__sandbox/partners
+    body: "{{args}}"
+    capture: { api_key: "$.api_key" }
+  register_webhook:
+    method: POST
+    path: /v1/webhooks
+    headers: { Authorization: "Bearer {{ctx.api_key}}" }
+    body: "{{args}}"
+  advance_shipment:
+    method: POST
+    path: "/__sandbox/shipments/{{ctx.shipment_id}}/advance"
+    body: { to: "{{args.to}}" }
+  advance_shipment_by_reference:
+    method: POST
+    path: "/__sandbox/shipments/by-reference/{{args.reference}}/advance"
+    body: { to: "{{args.to}}" }
+queries:
+  charges:
+    method: GET
+    path: /__sandbox/charges
+    query: { reference: "{{args.reference}}" }
+  shipment_by_reference:
+    method: GET
+    path: /v1/shipments
+    headers: { Authorization: "Bearer {{ctx.api_key}}" }
+    query: { reference: "{{args.reference}}" }
