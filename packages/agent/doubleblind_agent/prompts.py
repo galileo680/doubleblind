@@ -111,7 +111,9 @@ You must:
 - commit after each green run of contract_tests.
 You must not: edit existing tests to make them pass, hardcode responses for test inputs, disable validation,
 install packages, or contact any external host.
-If the contract is contradictory or impossible on your side, call raise_contract_gap with a precise description.
+Your binding (action and query paths, args, captures) and test hooks are yours to design: when a scenario does not
+fit them, change the binding or the hooks. Call raise_contract_gap only when the contract itself is contradictory or
+impossible (e.g. two scenarios demand different results for the same input), with a precise description.
 Work in small steps: read the relevant code, edit, run contract_tests, fix. Call finish only when everything is green."""
 
 TRIAGE = """You classify a failing contract test report for {party}. Categories: CODE_BUG (our implementation), CONTRACT_GAP

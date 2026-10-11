@@ -135,7 +135,7 @@ async def probe_credentials(foreign_tag: str | None) -> ProbeResult:
 async def probe_models(api_key: str | None) -> ProbeResult:
     name = "Token Factory /v1/models from the party runtime"
     if not api_key:
-        return ProbeResult(name, "200", "NEBIUS_API_KEY is not set", "failed")
+        return ProbeResult(name, "200", "NEBIUS_API_KEY is not set", "skipped")
     async with httpx.AsyncClient(timeout=30.0) as http:
         try:
             response = await http.get(MODELS_URL, headers={"Authorization": f"Bearer {api_key}"})
@@ -145,9 +145,12 @@ async def probe_models(api_key: str | None) -> ProbeResult:
 
 
 class SandboxIsolationProbe:
-    def __init__(self, factory: ProbeFactory, bases: Mapping[str, str]) -> None:
+    def __init__(
+        self, factory: ProbeFactory, bases: Mapping[str, str], check_models: bool = True
+    ) -> None:
         self.factory = factory
         self.bases = dict(bases)
+        self.check_models = check_models
 
     async def run(self) -> list[ProbeResult]:
         sandbox = self.factory()
@@ -159,8 +162,9 @@ class SandboxIsolationProbe:
                 lambda: probe_listing(sandbox, consumer),
                 lambda: probe_credentials(self.bases["parcelly"].removeprefix("tag:")),
                 lambda: probe_no_route(sandbox, consumer, provider),
-                lambda: probe_models(os.environ.get("NEBIUS_API_KEY")),
             ]
+            if self.check_models:
+                probes.append(lambda: probe_models(os.environ.get("NEBIUS_API_KEY")))
             return list(await asyncio.gather(*(probe() for probe in probes)))
         finally:
             await sandbox.aclose()

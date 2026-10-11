@@ -19,12 +19,6 @@ MYPY_TARGETS = (
     "scripts",
     "tests",
 )
-PENDING_TARGETS = {
-    "reset": "M12",
-    "demo-live": "M10",
-    "demo-record": "M12",
-    "demo-replay": "M12",
-}
 
 
 def run(command: Sequence[str | Path], cwd: Path = ROOT) -> None:
@@ -148,12 +142,13 @@ def task_build() -> None:
     run_npm_script("build", (DASHBOARD,))
 
 
-def pending(target: str) -> Callable[[], None]:
-    def report() -> None:
-        milestone = PENDING_TARGETS[target]
-        raise SystemExit(f"'{target}' becomes available in {milestone}.")
+def demo(command: str, sandbox: str = "tokenfactory") -> Callable[[], None]:
+    def run_demo() -> None:
+        selected = os.environ.get("DOUBLEBLIND_SANDBOX", sandbox)
+        pace = os.environ.get("DOUBLEBLIND_REPLAY_DELAY_MS", "0")
+        run([require_venv(), "scripts/demo.py", command, "--sandbox", selected, "--pace", pace])
 
-    return report
+    return run_demo
 
 
 TASKS: dict[str, Callable[[], None]] = {
@@ -169,7 +164,13 @@ TASKS: dict[str, Callable[[], None]] = {
     "probe": task_probe,
     "up": task_up,
     "down": task_down,
-    **{target: pending(target) for target in PENDING_TARGETS},
+    "reset": demo("reset"),
+    "demo-live": demo("live"),
+    "demo-record": demo("record"),
+    "demo-replay": demo("replay"),
+    "demo-replay-offline": lambda: run(
+        [require_venv(), "scripts/demo.py", "replay", "--sandbox", "docker"]
+    ),
 }
 
 

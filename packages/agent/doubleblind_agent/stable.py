@@ -2,6 +2,10 @@ import re
 
 VOLATILE = (
     (re.compile(r"\x1b\[[0-9;]*[A-Za-z]"), ""),
+    (
+        re.compile(r'(File \\?"(?:<frozen [^>]+>|/usr/local/lib/python3[^"\\]*)\\?", line )\d+'),
+        r"\1<n>",
+    ),
     (re.compile(r"\b(127\.0\.0\.1|localhost|0\.0\.0\.0):\d+"), r"\1:<port>"),
     (
         re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"),

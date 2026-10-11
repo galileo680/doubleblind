@@ -1,7 +1,7 @@
 PYTHON ?= python3
 TASKS = $(PYTHON) scripts/tasks.py
 
-.PHONY: install lint format test build check-comments smoke-demo golden scripted-session up down reset probe demo-live demo-record demo-replay
+.PHONY: install lint format test build check-comments smoke-demo golden scripted-session up down reset probe demo-live demo-record demo-replay demo-replay-offline
 
 install:
 	$(TASKS) install
@@ -50,3 +50,6 @@ demo-record:
 
 demo-replay:
 	$(TASKS) demo-replay
+
+demo-replay-offline:
+	$(TASKS) demo-replay-offline

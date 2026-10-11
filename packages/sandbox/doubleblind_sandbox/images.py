@@ -8,7 +8,7 @@ from doubleblind_sandbox.provider import REPO_DIR, SandboxError, SandboxProvider
 TOOLS_DIR = "/opt/doubleblind"
 RECIPE_PATH = f"{TOOLS_DIR}/recipe.sh"
 WHEELS_DIR = f"{TOOLS_DIR}/wheels"
-BASE_IMAGE = "tag:python:3.13-slim"
+BASE_IMAGES = {"tokenfactory": "tag:python:3.13-slim", "docker": "tag:python:3.13.13-slim"}
 BUILD_TIMEOUT_S = 1500
 SKIPPED_PARTS = frozenset(
     {"node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".git"}
@@ -91,10 +91,11 @@ async def ensure_base_image(
 ) -> BaseImage:
     files = build_files(plan, wheels)
     hashed = {path: content for path, content in files.items() if not path.startswith(WHEELS_DIR)}
-    tag = base_tag(plan.party, content_hash(hashed, [wheels_digest, BASE_IMAGE]))
+    start = BASE_IMAGES[provider.name]
+    tag = base_tag(plan.party, content_hash(hashed, [wheels_digest, start]))
     if not force and await provider.find_tag(tag) is not None:
         return BaseImage(plan.party, tag, built=False)
-    workspace = await provider.open_workspace(plan.party, BASE_IMAGE)
+    workspace = await provider.open_workspace(plan.party, start)
     result = await provider.run(
         workspace,
         f"sh {RECIPE_PATH}",

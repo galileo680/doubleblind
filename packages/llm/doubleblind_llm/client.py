@@ -22,7 +22,12 @@ from doubleblind_llm.budget import (
     spend_limit_from_env,
 )
 from doubleblind_llm.capabilities import CapabilityReport, ModelCapabilities, load_capabilities
-from doubleblind_llm.cassette import Cassette, cassette_path_from_env, fingerprint
+from doubleblind_llm.cassette import (
+    Cassette,
+    cassette_path_from_env,
+    fingerprint,
+    request_tail,
+)
 from doubleblind_llm.domain import (
     LLMCallEvent,
     LLMRequest,
@@ -303,7 +308,8 @@ class LLMClient:
             assert self.cassette is not None
             recorded = self.cassette.next(key)
             if recorded is None:
-                raise ReplayMissError(key, role_name)
+                report = self.cassette.miss_report(role_name, request.party, request_tail(payload))
+                raise ReplayMissError(key, role_name, report)
             if self.replay_delay_ms:
                 await asyncio.sleep(self.replay_delay_ms / 1000)
             self._emit(role_name, recorded, request.session_id, request.party, from_cache=True)
@@ -324,7 +330,7 @@ class LLMClient:
         )
         if self.mode == "record":
             assert self.cassette is not None
-            self.cassette.record(key, role_name, raw)
+            self.cassette.record(key, role_name, raw, request.party, request_tail(payload))
         return raw
 
     def _semaphore(self, model: ModelSpec) -> asyncio.Semaphore:

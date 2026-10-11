@@ -15,7 +15,8 @@ from eval_negotiation import CONTRACT
 from eval_negotiation import evaluate as evaluate_contract
 from sandbox_party import PARTIES, SandboxKind, base_heads, sandbox_factory
 from scripted_party import ScriptedParty
-from scripted_session import PRESET, dashboard_link, running_broker
+from scripted_session import PRESET, dashboard_link, hold_broker, running_broker
+from tunnel import wait_until_reachable
 
 from doubleblind_agent.main import PartyConfig, PartyRuntime
 from doubleblind_broker.db import build_engine
@@ -24,11 +25,11 @@ from doubleblind_broker.service import BrokerService, BrokerSettings
 from doubleblind_contract.loader import parse_yaml
 from doubleblind_contract.runtime import free_port
 from doubleblind_sandbox.environment import gateway_url
+from doubleblind_sandbox.isolation_probe import SandboxIsolationProbe
 from doubleblind_sandbox.local import LocalSandboxProvider
 
 STATE_ROOT = REPO_ROOT / "volumes" / "state"
 RECORDINGS = REPO_ROOT / "demo" / "recordings"
-CASSETTES = {"agents": "spokes-parcelly.jsonl", "scripted": "spokes-parcelly-coders.jsonl"}
 ACTIVE_STATES = {
     "negotiating": {"CREATED", "BRIEFING"},
     "signatures": {"CREATED", "BRIEFING", "NEGOTIATING", "AMENDING"},
@@ -147,7 +148,14 @@ def negotiate_with_scripts(url: str, session_id: str, tokens: dict[str, str]) ->
         thread.join()
 
 
-def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) -> dict[str, Any]:
+def run_agents(
+    kind: SandboxKind,
+    local_root: Path,
+    until: str,
+    scripted: bool,
+    name: str = "agents",
+    hold: bool = False,
+) -> dict[str, Any]:
     factory = sandbox_factory(kind, local_root)
     bases = base_heads(kind, local_root)
     settings = BrokerSettings(
@@ -159,13 +167,18 @@ def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) 
     port = int(os.environ.get("BROKER_PORT", "0")) or free_port()
     gateway = gateway_url(kind, port)
     executor = SandboxGatewayE2E(factory, gateway) if gateway else None
-    service = BrokerService(build_engine("sqlite://"), settings, executor)
+    probe = (
+        SandboxIsolationProbe(factory, bases, kind == "tokenfactory") if kind != "local" else None
+    )
+    service = BrokerService(build_engine("sqlite://"), settings, executor, None, probe)
     host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
     with (
         running_broker(service, port, host) as url,
         httpx.Client(base_url=url, timeout=60.0) as admin,
     ):
-        created = admin.post("/api/v1/sessions", json={"name": "agents", "preset": PRESET}).json()
+        if kind == "tokenfactory" and gateway:
+            wait_until_reachable(gateway)
+        created = admin.post("/api/v1/sessions", json={"name": name, "preset": PRESET}).json()
         session_id, tokens = created["session_id"], created["tokens"]
         observer = {"Authorization": f"Bearer {tokens['observer']}"}
         sessions = f"/api/v1/sessions/{session_id}"
@@ -182,7 +195,7 @@ def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) 
         for runtime in runtimes:
             for line in runtime.log:
                 print(f"[{runtime.config.party}] {line}")
-        return {
+        outcome = {
             "session": admin.get(sessions, headers=observer).json(),
             "events": admin.get(f"{sessions}/events", headers=observer).json(),
             "turns": admin.get(f"{sessions}/turns", headers=observer).json(),
@@ -191,6 +204,9 @@ def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) 
             "certificate": admin.get(f"{sessions}/certificate", headers=observer).json(),
             "probe": admin.post(f"{sessions}/isolation-probe", headers=observer).json(),
         }
+        if hold:
+            hold_broker(url)
+        return outcome
 
 
 def evaluate_briefing(events: list[dict[str, Any]]) -> bool:
@@ -330,7 +346,11 @@ def main() -> None:
     parser.add_argument("--negotiation", choices=["agents", "scripted"], default="agents")
     arguments = parser.parse_args()
     os.environ["DOUBLEBLIND_LLM_MODE"] = arguments.mode
-    os.environ["DOUBLEBLIND_CASSETTE"] = str(RECORDINGS / CASSETTES[arguments.negotiation])
+    os.environ["DOUBLEBLIND_CASSETTE"] = str(
+        RECORDINGS / "spokes-parcelly.jsonl"
+        if arguments.negotiation == "agents"
+        else RECORDINGS / "spokes-parcelly-demo.jsonl"
+    )
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         local_root = Path(directory) / "sandbox"
         try:

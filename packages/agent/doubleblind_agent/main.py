@@ -93,7 +93,7 @@ class PartyRuntime:
         if sandbox.spent_usd:
             await broker.post_event({"type": "sandbox.cost", "cost_usd": sandbox.spent_usd})
 
-    async def build_psm_and_brief(self, broker: BrokerClient, context: dict[str, Any]) -> None:
+    async def build_private_model(self, broker: BrokerClient, context: dict[str, Any]) -> Psm:
         party, role = self.config.party, context["role"]
         started = time.monotonic()
         sandbox = self.sandbox()
@@ -118,6 +118,16 @@ class PartyRuntime:
             "egress.json",
             {"synthetic_allowlist": context["synthetic_allowlist"], "repo_paths": repo.tree},
         )
+        return psm
+
+    async def private_model(self, broker: BrokerClient, context: dict[str, Any]) -> Psm:
+        if (self.config.state_dir / "psm.json").is_file():
+            return Psm.model_validate(self.load("psm.json"))
+        return await self.build_private_model(broker, context)
+
+    async def build_psm_and_brief(self, broker: BrokerClient, context: dict[str, Any]) -> None:
+        party, role = self.config.party, context["role"]
+        psm = await self.build_private_model(broker, context)
 
         async def brief(feedback: list[str]) -> dict[str, Any]:
             synthetic = context["synthetic_allowlist"]
@@ -159,7 +169,7 @@ class PartyRuntime:
     async def implement(self, broker: BrokerClient, context: dict[str, Any]) -> bool:
         party, side = self.config.party, context["role"]
         contract_yaml = await broker.get(f"/contract?version={context['signed_version']}")
-        psm = Psm.model_validate(self.load("psm.json"))
+        psm = await self.private_model(broker, context)
         sandbox = self.sandbox()
 
         async def progress(step: int, files_changed: int, note: str) -> None:

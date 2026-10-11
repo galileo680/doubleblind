@@ -158,6 +158,6 @@ async def run_coder(
         except Finished as finished:
             finished.outcome.transcript = messages
             return finished.outcome
-        return Outcome("stuck", refused, toolbox.last_report, transcript=messages)
+        return Outcome("stuck", stable(refused), toolbox.last_report, transcript=messages)
     report = toolbox.last_report
     return Outcome("stuck", f"no finish after {MAX_STEPS} steps", report, transcript=messages)

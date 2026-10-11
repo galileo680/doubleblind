@@ -25,7 +25,7 @@ from doubleblind_broker.db import (
     TurnRecord,
     open_session,
 )
-from doubleblind_broker.e2e import E2EExecutor, E2ERequest, UnavailableE2E
+from doubleblind_broker.e2e import E2EExecutor, E2EOutcome, E2ERequest, UnavailableE2E
 from doubleblind_broker.events import EventLog, utc_now
 from doubleblind_broker.gateway import (
     Allowlist,
@@ -618,6 +618,9 @@ class BrokerService:
                     "role": party.role,
                     "signed_version": record.signed_contract_version,
                     "secrets": json.loads(record.secrets_json),
+                    "synthetic_allowlist": self.preset(
+                        record.preset
+                    ).synthetic_allowlist.model_dump(),
                 }
                 if record.e2e_feedback_json is not None:
                     context["sanitized_e2e"] = json.loads(record.e2e_feedback_json)
@@ -1211,13 +1214,19 @@ class BrokerService:
         self.spawn(self.run_e2e(session_id))
         return {"started": True}
 
-    async def run_e2e(self, session_id: str) -> None:
+    async def execute_e2e(self, session_id: str, attempt: int) -> E2EOutcome:
         started = Outbox()
-        started.add("e2e.started", "broker", {})
+        started.add("e2e.started", "broker", {"attempt": attempt})
         self.flush(session_id, started)
+        return await asyncio.to_thread(self.e2e_executor.run, self.e2e_request(session_id))
+
+    async def run_e2e(self, session_id: str) -> None:
         try:
-            request = self.e2e_request(session_id)
-            report, cost_usd = await asyncio.to_thread(self.e2e_executor.run, request)
+            report, cost_usd = await self.execute_e2e(session_id, 1)
+            statuses = {scenario.status for scenario in report.scenarios}
+            if "error" in statuses and "failed" not in statuses:
+                report, retry_cost = await self.execute_e2e(session_id, 2)
+                cost_usd += retry_cost
         except Exception as error:
             logger.exception("end-to-end run failed for %s", session_id)
             message = f"{type(error).__name__}: {error}"

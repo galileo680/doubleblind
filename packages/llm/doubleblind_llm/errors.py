@@ -22,10 +22,12 @@ class BudgetExceededError(LLMError):
 
 
 class ReplayMissError(LLMError):
-    def __init__(self, cache_key: str, role: str) -> None:
+    def __init__(self, cache_key: str, role: str, report: str = "") -> None:
         self.cache_key = cache_key
         self.role = role
-        super().__init__(f"No recorded response for role '{role}' with cache key {cache_key}")
+        self.report = report
+        message = f"No recorded response for role '{role}' with cache key {cache_key}"
+        super().__init__(f"{message}\n{report}" if report else message)
 
 
 class StructuredOutputError(LLMError):
