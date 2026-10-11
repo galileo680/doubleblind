@@ -41,6 +41,14 @@ class Cassette:
         self._cursor[key] = position + 1
         return entries[min(position, len(entries) - 1)]
 
+    def next_unused(self, key: str) -> RawCompletion | None:
+        entries = self._load().get(key, [])
+        position = self._cursor[key]
+        if position >= len(entries):
+            return None
+        self._cursor[key] = position + 1
+        return entries[position]
+
     def record(self, key: str, role: str, completion: RawCompletion) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(

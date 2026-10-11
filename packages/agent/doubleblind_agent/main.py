@@ -9,18 +9,21 @@ from typing import Any
 
 from doubleblind_agent.brief import write_brief
 from doubleblind_agent.broker_client import BrokerClient
+from doubleblind_agent.coder import run_coder
 from doubleblind_agent.egress_guard import EgressGuard
 from doubleblind_agent.models import Psm
 from doubleblind_agent.negotiator import negotiation_context, propose_turn
 from doubleblind_agent.psm import build_psm, snapshot
+from doubleblind_agent.tools import BINDING_FILE, Toolbox
 from doubleblind_contract.guard_rules import SyntheticAllowlist
 from doubleblind_llm import LLMClient
 from doubleblind_llm.domain import LLMCallEvent
 from doubleblind_sandbox.environment import remote_sandbox
-from doubleblind_sandbox.provider import ServiceSandbox
+from doubleblind_sandbox.provider import ServiceSandbox, Workspace
 
 SandboxFactory = Callable[[], ServiceSandbox]
-ACTIONS = frozenset({"build_psm_and_brief", "negotiate", "amend"})
+MAX_CONTINUATIONS = 2
+ACTIONS = frozenset({"build_psm_and_brief", "negotiate", "amend", "implement", "fix_after_e2e"})
 
 
 @dataclass(frozen=True)
@@ -54,6 +57,9 @@ class PartyRuntime:
         self.calls: list[LLMCallEvent] = []
         self.llm = LLMClient.from_env(on_call=self.calls.append)
         self.log: list[str] = []
+        self.idle = False
+        self.continuations = 0
+        self.previous = ""
 
     def save(self, name: str, value: Any) -> None:
         self.config.state_dir.mkdir(parents=True, exist_ok=True)
@@ -137,21 +143,112 @@ class PartyRuntime:
 
         await guard.send("turns", turn, broker.post_turn)
 
+    async def workspace(self, sandbox: ServiceSandbox) -> Workspace:
+        path = self.config.state_dir / "workspace.json"
+        if path.is_file():
+            saved = self.load("workspace.json")
+            return Workspace(self.config.party, saved["head"], saved["history"])
+        return await sandbox.open_workspace(self.config.party, self.config.base)
+
+    async def implement(self, broker: BrokerClient, context: dict[str, Any]) -> bool:
+        party, side = self.config.party, context["role"]
+        contract_yaml = await broker.get(f"/contract?version={context['signed_version']}")
+        psm = Psm.model_validate(self.load("psm.json"))
+        sandbox = self.sandbox()
+
+        async def progress(step: int, files_changed: int, note: str) -> None:
+            event = {"type": "coder.progress", "step": step, "files_changed": files_changed}
+            await broker.post_event({**event, "note": note})
+
+        try:
+            workspace = await self.workspace(sandbox)
+            toolbox = Toolbox(
+                sandbox,
+                workspace,
+                self.llm,
+                party,
+                side,
+                contract_yaml,
+                context["secrets"],
+                f"doubleblind/{self.config.session_id}",
+            )
+            await toolbox.prepare()
+            outcome = await run_coder(
+                self.llm,
+                toolbox,
+                psm,
+                contract_yaml,
+                context.get("sanitized_e2e"),
+                self.previous,
+                progress,
+            )
+            self.save("workspace.json", {"head": workspace.head, "history": workspace.history})
+            binding = await toolbox.read_text(BINDING_FILE) if outcome.kind == "done" else ""
+            if outcome.kind == "done":
+                diff = await toolbox.shell(f"git diff --stat {toolbox.base_commit} HEAD")
+                await sandbox.tag(workspace, f"doubleblind-{party}-{self.config.session_id}")
+        finally:
+            await sandbox.aclose()
+        self.save("coder_transcript.json", outcome.transcript)
+        self.log.append(f"coder: {outcome.kind} ({outcome.summary[:200]})")
+        guard = self.guard(broker)
+        if outcome.kind == "contract_gap":
+            gap = {"scenario_ids": outcome.scenario_ids, "description": outcome.summary}
+
+            async def reported_gap(feedback: list[str]) -> dict[str, Any]:
+                return gap
+
+            await guard.send("results", reported_gap, broker.post_contract_gap)
+            return True
+        if outcome.kind == "stuck":
+            scenarios = (outcome.report or {}).get("scenarios", [])
+            statuses = [f"{item['id']} {item['status']}" for item in scenarios]
+            self.previous = "\n".join(statuses) or "contract tests were not run yet"
+            self.continuations += 1
+            return self.continuations <= MAX_CONTINUATIONS
+        if outcome.report is None:
+            return False
+        (self.config.state_dir / "PR.md").write_text(
+            f"# DoubleBlind: {party}\n\n{outcome.summary}\n\n```\n{diff.stdout}\n```\n",
+            encoding="utf-8",
+        )
+        run = {
+            "side": side,
+            "contract_version": context["signed_version"],
+            "summary": outcome.report["summary"],
+            "results": [
+                {"scenario_id": item["id"], "status": item["status"]}
+                for item in outcome.report["scenarios"]
+            ],
+            "binding_yaml": binding,
+            "workspace_image": workspace.head,
+        }
+
+        async def results(feedback: list[str]) -> dict[str, Any]:
+            return run
+
+        await guard.send("results", results, broker.post_test_run)
+        return True
+
     async def run(self) -> None:
         broker = BrokerClient(self.config.broker_url, self.config.token, self.config.session_id)
         try:
             while True:
                 action = await broker.next_action()
                 name = action["action"]
-                if name == "wait":
+                self.idle = name == "wait"
+                if self.idle:
                     continue
                 if name not in self.actions:
                     self.log.append(f"stopped at action {name}")
                     return
                 if name == "build_psm_and_brief":
                     await self.build_psm_and_brief(broker, action["context"])
-                else:
+                elif name in ("negotiate", "amend"):
                     await self.negotiate(broker, action["context"])
+                elif not await self.implement(broker, action["context"]):
+                    await self.report_llm_calls(broker)
+                    return
                 await self.report_llm_calls(broker)
         finally:
             await broker.aclose()

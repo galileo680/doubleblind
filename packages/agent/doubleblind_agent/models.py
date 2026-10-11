@@ -123,3 +123,11 @@ class Turn(Model):
             for patch in self.patches
             if patch.path.partition("/")[2].split("/")[0] not in BROKER_FIELDS
         ]
+
+
+class TriageResult(Model):
+    category: Literal["CODE_BUG", "CONTRACT_GAP", "COUNTERPARTY_ISSUE", "ENV_ERROR"]
+    scenario_ids: list[str]
+    summary_for_coder: str
+    sanitized_reason_for_broker: str
+    suggested_next_step: Literal["fix_code", "raise_contract_gap", "retry"]

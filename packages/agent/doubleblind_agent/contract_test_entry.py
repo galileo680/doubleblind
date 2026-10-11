@@ -7,9 +7,9 @@ OUTPUT_TAIL = 4000
 
 
 def main() -> None:
-    side, contract, binding, report = sys.argv[1:5]
+    side, contract, binding, report, *extra = sys.argv[1:]
     completed = subprocess.run(
-        ["db-contract", "test", side, contract, "--binding", binding, "--report", report],
+        ["db-contract", "test", side, contract, "--binding", binding, "--report", report, *extra],
         capture_output=True,
         text=True,
         encoding="utf-8",

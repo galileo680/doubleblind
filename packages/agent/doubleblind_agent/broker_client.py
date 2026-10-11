@@ -48,5 +48,11 @@ class BrokerClient:
     async def post_turn(self, turn: dict[str, Any]) -> Any:
         return await self.post("/turns", turn)
 
+    async def post_test_run(self, run: dict[str, Any]) -> Any:
+        return await self.post("/test-runs", run)
+
+    async def post_contract_gap(self, gap: dict[str, Any]) -> Any:
+        return await self.post("/contract-gap", gap)
+
     async def post_event(self, event: dict[str, Any]) -> Any:
         return await self.post("/events", event)

@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from demo_workspace import REPO_ROOT
 from eval_negotiation import CONTRACT
 from eval_negotiation import evaluate as evaluate_contract
 from sandbox_party import PARTIES, SandboxKind, base_heads, sandbox_factory
+from scripted_party import ScriptedParty
 from scripted_session import PRESET, running_broker
 
 from doubleblind_agent.main import PartyConfig, PartyRuntime
@@ -22,15 +24,28 @@ from doubleblind_contract.loader import parse_yaml
 from doubleblind_sandbox.local import LocalSandboxProvider
 
 STATE_ROOT = REPO_ROOT / "volumes" / "state"
-CASSETTE = REPO_ROOT / "demo" / "recordings" / "spokes-parcelly.jsonl"
+RECORDINGS = REPO_ROOT / "demo" / "recordings"
+CASSETTES = {"agents": "spokes-parcelly.jsonl", "scripted": "spokes-parcelly-coders.jsonl"}
 ACTIVE_STATES = {
     "negotiating": {"CREATED", "BRIEFING"},
     "signatures": {"CREATED", "BRIEFING", "NEGOTIATING", "AMENDING"},
+    "implemented": {
+        "CREATED",
+        "BRIEFING",
+        "NEGOTIATING",
+        "AMENDING",
+        "AWAITING_SIGNATURES",
+        "IMPLEMENTING",
+    },
 }
 ACTIONS = {
     "negotiating": frozenset({"build_psm_and_brief"}),
     "signatures": frozenset({"build_psm_and_brief", "negotiate", "amend"}),
+    "implemented": frozenset(
+        {"build_psm_and_brief", "negotiate", "amend", "implement", "fix_after_e2e"}
+    ),
 }
+CODING_ACTIONS = frozenset({"implement", "fix_after_e2e"})
 HIDDEN_RULES = {
     "pallet above 25 kg": r"pallet|palet",
     "size from weight": r"\bsize\b|gabaryt|SIZE_WEIGHT",
@@ -63,6 +78,7 @@ async def run_parties(
     bases: dict[str, str],
     factory: Any,
     until: str,
+    actions: frozenset[str],
 ) -> list[PartyRuntime]:
     runtimes = [
         PartyRuntime(
@@ -70,7 +86,7 @@ async def run_parties(
                 url, tokens[f"agent_{party}"], session_id, party, bases[party], STATE_ROOT / party
             ),
             factory,
-            ACTIONS[until],
+            actions,
         )
         for party in PARTIES
     ]
@@ -78,9 +94,19 @@ async def run_parties(
     async with httpx.AsyncClient(
         base_url=url, headers={"Authorization": f"Bearer {tokens['observer']}"}
     ) as viewer:
-        while not any(task.done() for task in tasks):
-            state = (await viewer.get(f"/api/v1/sessions/{session_id}")).json()["state"]
-            if state not in ACTIVE_STATES[until]:
+        while not all(task.done() for task in tasks):
+            if any(task.done() and task.exception() for task in tasks):
+                break
+            if any(task.done() for task in tasks) and all(
+                task.done() or runtime.idle for task, runtime in zip(tasks, runtimes, strict=True)
+            ):
+                break
+            events = (await viewer.get(f"/api/v1/sessions/{session_id}/events")).json()
+            if any(
+                event["type"] == "session.state_changed"
+                and event["payload"]["to"] not in ACTIVE_STATES[until]
+                for event in events
+            ):
                 break
             await asyncio.sleep(1.0)
     for task in tasks:
@@ -91,7 +117,32 @@ async def run_parties(
     return runtimes
 
 
-def run_agents(kind: SandboxKind, local_root: Path, until: str) -> dict[str, Any]:
+class HandOver(Exception):
+    pass
+
+
+class StopBeforeCoding:
+    def implement(self, contract_yaml: str, secrets: Any, side: Any) -> dict[str, Any]:
+        raise HandOver
+
+
+def negotiate_with_scripts(url: str, session_id: str, tokens: dict[str, str]) -> None:
+    def play(party: str) -> None:
+        headers = {"Authorization": f"Bearer {tokens[f'agent_{party}']}"}
+        with httpx.Client(base_url=url, timeout=60.0, headers=headers) as client:
+            try:
+                ScriptedParty(client, session_id, party, StopBeforeCoding()).run(600.0)
+            except HandOver:
+                return
+
+    threads = [threading.Thread(target=play, args=(party,)) for party in PARTIES]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
+def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) -> dict[str, Any]:
     factory = sandbox_factory(kind, local_root)
     bases = base_heads(kind, local_root)
     settings = BrokerSettings(
@@ -107,7 +158,14 @@ def run_agents(kind: SandboxKind, local_root: Path, until: str) -> dict[str, Any
         observer = {"Authorization": f"Bearer {tokens['observer']}"}
         sessions = f"/api/v1/sessions/{session_id}"
         admin.post(f"{sessions}/start", headers=observer).raise_for_status()
-        runtimes = asyncio.run(run_parties(url, session_id, tokens, bases, factory, until))
+        actions = ACTIONS[until]
+        if scripted:
+            negotiate_with_scripts(url, session_id, tokens)
+            actions = CODING_ACTIONS
+        if until == "implemented":
+            for party in PARTIES:
+                (STATE_ROOT / party / "workspace.json").unlink(missing_ok=True)
+        runtimes = asyncio.run(run_parties(url, session_id, tokens, bases, factory, until, actions))
         for runtime in runtimes:
             for line in runtime.log:
                 print(f"[{runtime.config.party}] {line}")
@@ -180,24 +238,76 @@ def evaluate_negotiation(outcome: dict[str, Any]) -> bool:
     return all(results)
 
 
+def evaluate_implementation(outcome: dict[str, Any]) -> bool:
+    contract = parse_yaml(outcome["contract"])
+    events = outcome["events"]
+    results = []
+    cycles = []
+    for party, side in (("spokes", "consumer"), ("parcelly", "provider")):
+        required = {item["id"] for item in contract["scenarios"] if item["side"] == side}
+        runs = [
+            event["payload"]
+            for event in events
+            if event["type"] == "tests.result" and event["payload"]["party"] == party
+        ]
+        passed = (
+            {item["scenario_id"] for item in runs[-1]["results"] if item["status"] == "passed"}
+            if runs
+            else set()
+        )
+        missing = sorted(required - passed)
+        results.append(
+            check(
+                f"{party}: all {len(required)} {side} scenarios green"
+                + (f" (missing {', '.join(missing)})" if missing else ""),
+                not missing,
+            )
+        )
+        notes = [
+            event["payload"]["note"]
+            for event in events
+            if event["type"] == "coder.progress" and event["payload"]["party"] == party
+        ]
+        steps = [event for event in events if event["type"] == "coder.progress"]
+        counts = [re.findall(r"(\d+)/(\d+) green", note) for note in notes]
+        red_then_green = not missing and any(
+            found and found[0][0] != found[0][1] for found in counts
+        )
+        test_runs = [note for note in notes if "green" in note]
+        print(f"{party}: {len(notes)} of {len(steps)} coder steps, test runs: {test_runs}")
+        cycles.append(red_then_green)
+    results.append(check("red -> triage -> fix -> green cycle seen", any(cycles)))
+    return all(results)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run both party runtimes against the broker")
     parser.add_argument("--sandbox", choices=["local", "tokenfactory", "docker"], default="docker")
     parser.add_argument("--mode", choices=["live", "record", "replay"], default="replay")
     parser.add_argument("--until", choices=sorted(ACTIVE_STATES), default="signatures")
+    parser.add_argument("--negotiation", choices=["agents", "scripted"], default="agents")
     arguments = parser.parse_args()
     os.environ["DOUBLEBLIND_LLM_MODE"] = arguments.mode
-    os.environ["DOUBLEBLIND_CASSETTE"] = str(CASSETTE)
+    os.environ["DOUBLEBLIND_CASSETTE"] = str(RECORDINGS / CASSETTES[arguments.negotiation])
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         local_root = Path(directory) / "sandbox"
         try:
-            outcome = run_agents(arguments.sandbox, local_root, arguments.until)
+            outcome = run_agents(
+                arguments.sandbox,
+                local_root,
+                arguments.until,
+                arguments.negotiation == "scripted",
+            )
         finally:
             LocalSandboxProvider(local_root).remove_all()
     events = outcome["events"]
-    ok = evaluate_briefing(events)
-    if arguments.until == "signatures":
-        ok = evaluate_negotiation(outcome) and ok
+    ok = True
+    if arguments.negotiation == "agents":
+        ok = evaluate_briefing(events)
+        if arguments.until != "negotiating":
+            ok = evaluate_negotiation(outcome) and ok
+    if arguments.until == "implemented":
+        ok = evaluate_implementation(outcome) and ok
     blocked = [event["payload"] for event in events if event["type"].startswith("egress.")]
     print(f"egress events: {blocked}")
     cost = sum(event["payload"]["cost_usd"] for event in events if event["type"] == "llm.call")

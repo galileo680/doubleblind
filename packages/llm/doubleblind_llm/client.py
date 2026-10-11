@@ -308,6 +308,12 @@ class LLMClient:
                 await asyncio.sleep(self.replay_delay_ms / 1000)
             self._emit(role_name, recorded, request.session_id, request.party, from_cache=True)
             return recorded
+        if self.mode == "record":
+            assert self.cassette is not None
+            reused = self.cassette.next_unused(key)
+            if reused is not None:
+                self._emit(role_name, reused, request.session_id, request.party, from_cache=True)
+                return reused
         raw = await self.send(
             model,
             payload,

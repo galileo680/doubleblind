@@ -7,6 +7,7 @@ from typing import Any, Literal
 from demo_workspace import BINDING_FILE, DEMO_DIR, REFERENCE_DIR, REPO_ROOT, side_env
 from scripted_party import payload_from_report, reference_binding
 
+import doubleblind_agent.contract_test_entry as contract_test_entry
 from doubleblind_contract.models import Side
 from doubleblind_contract.runtime import secret_env_name
 from doubleblind_llm.budget import Ledger, ledger_path_from_env
@@ -18,7 +19,7 @@ from doubleblind_sandbox.provider import REPO_DIR, ServiceSandbox, Workspace, re
 
 SandboxKind = Literal["local", "tokenfactory", "docker"]
 SandboxFactory = Callable[[], ServiceSandbox]
-ENTRY = REPO_ROOT / "scripts" / "contract_test_entry.py"
+ENTRY = Path(contract_test_entry.__file__)
 WORK_DIR = ".doubleblind"
 TEST_TIMEOUT_S = 600
 PARTIES = ("spokes", "parcelly")

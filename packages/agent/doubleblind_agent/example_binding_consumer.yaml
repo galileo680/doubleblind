@@ -1,0 +1,24 @@
+doubleblind_binding: "1.0"
+side: consumer
+base_url: "${CONSUMER_BASE_URL}"
+webhook_receiver_url: "${CONSUMER_BASE_URL}/integrations/printhouse/webhook"
+app:
+  manage: true
+  start: "python -m uvicorn shop.main:app --host 127.0.0.1 --port ${CONSUMER_PORT}"
+  cwd: "."
+  env:
+    PRINTHOUSE_BASE_URL: "{{stub.url}}"
+    PRINTHOUSE_API_KEY: "{{secrets.partner_api_key}}"
+    PRINTHOUSE_WEBHOOK_SECRET: "{{secrets.webhook_secret}}"
+    SHOP_TEST_HOOKS: "1"
+  healthcheck: { method: GET, path: /health }
+actions:
+  reset: { method: POST, path: /__test/reset }
+  create_order:
+    method: POST
+    path: /__test/orders
+    body: "{{args}}"
+    capture: { order_id: "$.id" }
+  pay_order: { method: POST, path: "/orders/{{ctx.order_id}}/pay" }
+queries:
+  order: { method: GET, path: "/orders/{{ctx.order_id}}" }

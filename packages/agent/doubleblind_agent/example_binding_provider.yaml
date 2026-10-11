@@ -1,0 +1,31 @@
+doubleblind_binding: "1.0"
+side: provider
+base_url: "${PROVIDER_BASE_URL}"
+app:
+  manage: true
+  start: "node src/server.js"
+  cwd: "."
+  env:
+    PORT: "${PROVIDER_PORT}"
+    TEST_MODE: "1"
+  healthcheck: { path: /health }
+actions:
+  reset: { method: POST, path: /__test/reset }
+  create_partner:
+    method: POST
+    path: /__test/partners
+    body: { api_key: "{{secrets.partner_api_key}}", webhook_url: "{{capture.url}}", webhook_secret: "{{secrets.webhook_secret}}" }
+  advance_job:
+    method: POST
+    path: "/__test/jobs/{{ctx.job_id}}/advance"
+    body: { to: "{{args.to}}" }
+  advance_job_by_reference:
+    method: POST
+    path: "/__test/jobs/by-reference/{{args.reference}}/advance"
+    body: { to: "{{args.to}}" }
+queries:
+  job_by_reference:
+    method: GET
+    path: /v1/jobs
+    headers: { Authorization: "Bearer {{secrets.partner_api_key}}" }
+    query: { reference: "{{args.reference}}" }

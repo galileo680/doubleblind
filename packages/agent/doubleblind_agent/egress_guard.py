@@ -9,6 +9,7 @@ from doubleblind_contract.guard_rules import (
     GuardVerdict,
     SyntheticAllowlist,
     check_message,
+    check_test_run,
     check_turn,
     redact,
 )
@@ -83,6 +84,9 @@ class EgressGuard:
     def check(self, kind: str, payload: dict[str, Any]) -> GuardVerdict:
         if kind == "turns":
             return check_turn(payload, self.allowlist, self.repo_paths)
+        if kind == "results":
+            checked = {key: value for key, value in payload.items() if key != "workspace_image"}
+            return check_test_run(checked, self.allowlist)
         return check_message(payload, self.allowlist, self.repo_paths)
 
     async def send(self, kind: str, build: Builder, send: Sender) -> Any:
@@ -95,7 +99,8 @@ class EgressGuard:
                 feedback = verdict.reasons
                 continue
             payload = redact_value(payload, verdict.redactions)
-            classified = await classify(self.llm, payload, self.party)
+            inspected = {key: value for key, value in payload.items() if key != "workspace_image"}
+            classified = await classify(self.llm, inspected, self.party)
             if classified.verdict == "block":
                 await self.report("egress.blocked", kind, ["blocked by the egress classifier"])
                 feedback = classified.reasons

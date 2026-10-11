@@ -156,7 +156,18 @@ class LlmCallIn(BaseModel):
     latency_ms: int = Field(ge=0)
 
 
-AgentEventIn = Annotated[PsmBuiltIn | EgressIn | LlmCallIn, Field(discriminator="type")]
+class CoderProgressIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["coder.progress"]
+    step: int = Field(ge=0)
+    files_changed: int = Field(ge=0)
+    note: str = Field(max_length=120)
+
+
+AgentEventIn = Annotated[
+    PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn, Field(discriminator="type")
+]
 
 
 @dataclass
@@ -1257,7 +1268,10 @@ class BrokerService:
                 logger.warning("autopilot could not sign for %s: %s", party_key, error.message)
 
     def record_agent_event(
-        self, principal: Principal, session_id: str, event: PsmBuiltIn | EgressIn | LlmCallIn
+        self,
+        principal: Principal,
+        session_id: str,
+        event: PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn,
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
         party_key = principal.party_key or ""
@@ -1265,7 +1279,7 @@ class BrokerService:
         outbox = Outbox()
         with open_session(self.engine) as db:
             record = self.session_record(db, session_id)
-            if isinstance(event, PsmBuiltIn):
+            if isinstance(event, PsmBuiltIn | CoderProgressIn):
                 outbox.add(event.type, party_key, payload)
             elif isinstance(event, EgressIn):
                 counter = "blocked_count" if event.type == "egress.blocked" else "redacted_count"
