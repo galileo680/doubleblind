@@ -15,3 +15,6 @@ demo/parcelly/node_modules
 **/.ruff_cache
 **/.mypy_cache
 **/*.db
+dashboard/dist
+dashboard/test-results
+dashboard/playwright-report

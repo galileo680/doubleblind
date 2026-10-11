@@ -20,6 +20,7 @@
   "then": { "required": ["webhook_receiver_url"] },
   "$defs": {
     "snakeId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "ctxName": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
     "nonEmptyText": { "type": "string", "minLength": 1 },
     "httpMethod": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
     "requestPath": { "type": "string", "pattern": "^/" },
@@ -69,7 +70,7 @@
         "body": true,
         "capture": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/snakeId" },
+          "propertyNames": { "$ref": "#/$defs/ctxName" },
           "additionalProperties": { "type": "string", "pattern": "^\\$" }
         }
       }

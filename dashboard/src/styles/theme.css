@@ -1,0 +1,130 @@
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0b0d;
+  --s1: #0f1114;
+  --s2: #14171b;
+  --s3: #1a1e23;
+  --line: #21252b;
+  --line2: #2b3038;
+  --fg: #e8eaed;
+  --fg2: #a2a8b1;
+  --fg3: #6c737d;
+  --a: oklch(0.74 0.12 250);
+  --a-bg: oklch(0.74 0.12 250 / 0.13);
+  --b: oklch(0.74 0.12 305);
+  --b-bg: oklch(0.74 0.12 305 / 0.13);
+  --o: oklch(0.77 0.14 155);
+  --o-bg: oklch(0.77 0.14 155 / 0.12);
+  --e: oklch(0.69 0.17 25);
+  --e-bg: oklch(0.69 0.17 25 / 0.13);
+  --w: oklch(0.81 0.13 80);
+  --w-bg: oklch(0.81 0.13 80 / 0.12);
+  --i: oklch(0.77 0.1 215);
+  --i-bg: oklch(0.77 0.1 215 / 0.12);
+  --n: #9aa0a9;
+  --n-bg: rgba(154, 160, 169, 0.12);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 30px rgba(0, 0, 0, 0.4);
+  --code: #0c0e11;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f6f5;
+  --s1: #ffffff;
+  --s2: #fafaf9;
+  --s3: #f0f0ee;
+  --line: #e6e6e3;
+  --line2: #d9d9d5;
+  --fg: #111316;
+  --fg2: #4e545c;
+  --fg3: #7a8088;
+  --a: oklch(0.52 0.15 250);
+  --a-bg: oklch(0.52 0.15 250 / 0.09);
+  --b: oklch(0.52 0.15 305);
+  --b-bg: oklch(0.52 0.15 305 / 0.09);
+  --o: oklch(0.52 0.13 155);
+  --o-bg: oklch(0.52 0.13 155 / 0.1);
+  --e: oklch(0.54 0.19 25);
+  --e-bg: oklch(0.54 0.19 25 / 0.09);
+  --w: oklch(0.56 0.13 70);
+  --w-bg: oklch(0.62 0.13 75 / 0.14);
+  --i: oklch(0.52 0.11 225);
+  --i-bg: oklch(0.52 0.11 225 / 0.09);
+  --n: #6a7079;
+  --n-bg: rgba(106, 112, 121, 0.1);
+  --shadow: 0 1px 2px rgba(16, 18, 22, 0.05), 0 10px 30px rgba(16, 18, 22, 0.07);
+  --code: #fbfbfa;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--a);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+::selection {
+  background: var(--a-bg);
+}
+
+@keyframes dbpulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes dbspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dbshimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+@keyframes dbrowin {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

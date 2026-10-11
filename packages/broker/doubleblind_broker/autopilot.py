@@ -79,7 +79,8 @@ async def autopilot_answer(
     role: str,
 ) -> str:
     preset_answer = preset.preset_answer(question)
-    if preset_answer is not None:
+    choices = {option.lower() for option in options}
+    if preset_answer is not None and (not choices or preset_answer.lower() in choices):
         return preset_answer
     persona = preset.personas.consumer if role == "consumer" else preset.personas.provider
     return await simulator.answer(question, options, default, persona)

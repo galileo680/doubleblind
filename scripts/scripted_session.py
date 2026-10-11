@@ -5,11 +5,12 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import httpx
 import uvicorn
@@ -33,7 +34,13 @@ from scripted_party import (
 from doubleblind_broker.app import create_app
 from doubleblind_broker.autopilot import DefaultOptionSimulator
 from doubleblind_broker.db import build_engine
-from doubleblind_broker.e2e import E2EExecutor, E2ERequest, LocalProcessE2E, SandboxGatewayE2E
+from doubleblind_broker.e2e import (
+    E2EExecutor,
+    E2EOutcome,
+    E2ERequest,
+    LocalProcessE2E,
+    SandboxGatewayE2E,
+)
 from doubleblind_broker.service import BrokerService, BrokerSettings, IsolationProbe
 from doubleblind_contract.loader import load_contract_text, parse_yaml
 from doubleblind_contract.runtime import RunReport, ScenarioResult, free_port, utc_timestamp
@@ -45,7 +52,7 @@ E2EMode = Literal["gateway", "cleanroom"]
 
 
 class ReportedGreenE2E:
-    def run(self, request: E2ERequest) -> RunReport:
+    def run(self, request: E2ERequest) -> E2EOutcome:
         contract = load_contract_text(request.contract_yaml)
         report = RunReport(contract.id, contract.version, "e2e", utc_timestamp())
         report.scenarios = [
@@ -53,7 +60,7 @@ class ReportedGreenE2E:
             for item in contract.scenarios_for("e2e")
         ]
         report.finished_at = utc_timestamp()
-        return report
+        return report, 0.0
 
 
 def normalized(contract: dict[str, Any]) -> dict[str, Any]:
@@ -79,6 +86,24 @@ class SessionOutcome:
     @property
     def matches_reference(self) -> bool:
         return normalized(self.contract) == normalized(reference_contract())
+
+
+def dashboard_link(broker_url: str, session_id: str, tokens: Mapping[str, str]) -> str:
+    humans = {
+        key.removeprefix("human_"): value
+        for key, value in tokens.items()
+        if key.startswith("human_")
+    }
+    return f"{broker_url}/#/s/{session_id}?{urlencode({'observer': tokens['observer'], **humans})}"
+
+
+def hold_broker(broker_url: str) -> None:
+    print(f"broker still serving {broker_url} · press Ctrl+C to stop", flush=True)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        return
 
 
 @contextmanager
@@ -112,6 +137,7 @@ def run_session(
     host: str = "127.0.0.1",
     isolation_probe: IsolationProbe | None = None,
     after: Callable[[httpx.Client, str], None] | None = None,
+    hold: bool = False,
 ) -> SessionOutcome:
     settings = BrokerSettings(
         presets_dir=REPO_ROOT / "demo" / "presets",
@@ -124,11 +150,15 @@ def run_session(
     )
     with running_broker(service, port, host) as broker_url:
         with httpx.Client(base_url=broker_url, timeout=60.0) as admin:
-            created = admin.post("/api/v1/sessions", json={"name": "scripted", "preset": PRESET})
+            created = admin.post(
+                "/api/v1/sessions",
+                json={"name": "Spokes ↔ Parcelly shipping (scripted)", "preset": PRESET},
+            )
             created.raise_for_status()
             session_id, tokens = created.json()["session_id"], created.json()["tokens"]
             observer = {"Authorization": f"Bearer {tokens['observer']}"}
             admin.post(f"/api/v1/sessions/{session_id}/start", headers=observer).raise_for_status()
+        print(f"dashboard: {dashboard_link(broker_url, session_id, tokens)}", flush=True)
         parties: dict[str, ScriptedParty] = {}
         errors: list[str] = []
         stop = threading.Event()
@@ -163,18 +193,22 @@ def run_session(
             events = viewer.get(f"/api/v1/sessions/{session_id}/events").json()
         for party in parties.values():
             party.client.close()
+        if hold:
+            hold_broker(broker_url)
     return SessionOutcome(
         state, contract, certificate, events, {k: p.log for k, p in parties.items()}, errors
     )
 
 
-def run_full_session(workspace: Workspace, timeout_s: float = 600.0) -> SessionOutcome:
+def run_full_session(
+    workspace: Workspace, timeout_s: float = 600.0, hold: bool = False
+) -> SessionOutcome:
     executor = LocalProcessE2E({"spokes": workspace.spokes, "parcelly": workspace.parcelly})
     implementers: dict[str, Implementer] = {
         "spokes": ContractTestsInWorkspace(workspace.spokes),
         "parcelly": ContractTestsInWorkspace(workspace.parcelly),
     }
-    return run_session(executor, implementers, timeout_s=timeout_s)
+    return run_session(executor, implementers, timeout_s=timeout_s, hold=hold)
 
 
 def run_quick_session(
@@ -197,7 +231,7 @@ def run_quick_session(
 
 
 def run_sandbox_session(
-    kind: SandboxKind, e2e_mode: E2EMode, timeout_s: float = 1200.0
+    kind: SandboxKind, e2e_mode: E2EMode, timeout_s: float = 1200.0, hold: bool = False
 ) -> SessionOutcome:
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         root = Path(directory)
@@ -214,7 +248,7 @@ def run_sandbox_session(
                     executor = LocalProcessE2E(
                         {"spokes": workspace.spokes, "parcelly": workspace.parcelly}
                     )
-                    return run_session(executor, implementers, timeout_s=timeout_s)
+                    return run_session(executor, implementers, timeout_s=timeout_s, hold=hold)
                 finally:
                     workspace.remove()
             port = int(os.environ.get("BROKER_PORT", "0")) or free_port()
@@ -226,7 +260,9 @@ def run_sandbox_session(
                 )
             host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
             gateway = SandboxGatewayE2E(factory, url)
-            return run_session(gateway, implementers, timeout_s=timeout_s, port=port, host=host)
+            return run_session(
+                gateway, implementers, timeout_s=timeout_s, port=port, host=host, hold=hold
+            )
         finally:
             LocalSandboxProvider(local_root).remove_all()
 
@@ -244,15 +280,18 @@ def main() -> None:
         choices=["gateway", "cleanroom"],
         default=os.environ.get("DOUBLEBLIND_E2E_MODE") or "gateway",
     )
+    parser.add_argument(
+        "--hold", action="store_true", help="keep the broker and dashboard running afterwards"
+    )
     arguments = parser.parse_args()
     cost_before = sandbox_cost_usd()
     if arguments.sandbox:
-        outcome = run_sandbox_session(arguments.sandbox, arguments.e2e)
+        outcome = run_sandbox_session(arguments.sandbox, arguments.e2e, hold=arguments.hold)
     else:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             workspace = build_workspace(Path(directory) / "workspace")
             try:
-                outcome = run_full_session(workspace)
+                outcome = run_full_session(workspace, hold=arguments.hold)
             finally:
                 workspace.remove()
     for event in outcome.events:

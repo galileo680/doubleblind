@@ -3,6 +3,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from jsonschema import Draft202012Validator
@@ -159,9 +160,13 @@ class ScenarioExecutor:
         request: dict[str, Any] = {"headers": spec.get("headers") or {}}
         if "body" in spec:
             request["json"] = spec["body"]
+        path = operation.request.path
+        for name, value in (spec.get("path") or {}).items():
+            path = path.replace(f"{{{name}}}", quote(str(value), safe=""))
         response = self.environment.http.request(
             operation.request.method,
-            f"{self.environment.provider_base_url.rstrip('/')}{operation.request.path}",
+            f"{self.environment.provider_base_url.rstrip('/')}{path}",
+            params=spec.get("query"),
             **request,
         )
         body = parse_response_body(response)

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import secrets as secret_tokens
@@ -50,10 +51,17 @@ from doubleblind_contract.guard_rules import (
 )
 from doubleblind_contract.loader import load_binding_text, load_contract_text, parse_yaml
 from doubleblind_contract.runtime import RunReport
-from doubleblind_contract.validate import check_binding_text, validate_contract_data
+from doubleblind_contract.validate import (
+    check_binding_text,
+    signing_problems,
+    validate_contract_data,
+)
 from doubleblind_sandbox.provider import ProbeResult
 
 logger = logging.getLogger(__name__)
+MAX_E2E_RUNS = 3
+AMENDMENT_ROUNDS = 8
+GATEWAY_FEEDBACK_FIELDS = ("party", "source", "method", "status", "violations")
 
 Role = Literal["consumer", "provider"]
 TurnStatus = Literal["continue", "ready_to_sign", "blocked"]
@@ -165,8 +173,16 @@ class CoderProgressIn(BaseModel):
     note: str = Field(max_length=120)
 
 
+class SandboxCostIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["sandbox.cost"]
+    cost_usd: float = Field(ge=0)
+
+
 AgentEventIn = Annotated[
-    PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn, Field(discriminator="type")
+    PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn | SandboxCostIn,
+    Field(discriminator="type"),
 ]
 
 
@@ -584,14 +600,19 @@ class BrokerService:
                 and record.turn_party == party.party_key
                 and not self.unanswered_questions(db, session_id)
             ):
-                return {
-                    "action": "amend" if state is State.AMENDING else "negotiate",
-                    "context": {
-                        "role": party.role,
-                        "round": record.round + 1,
-                        "based_on_version": record.current_contract_version,
-                    },
+                turn_context: dict[str, Any] = {
+                    "role": party.role,
+                    "round": record.round + 1,
+                    "based_on_version": record.current_contract_version,
                 }
+                if state is State.AMENDING:
+                    gaps = [
+                        event["payload"]
+                        for event in self.events.list(session_id)
+                        if event["type"] == "contract.gap"
+                    ]
+                    return {"action": "amend", "context": {**turn_context, "gap": gaps[-1]}}
+                return {"action": "negotiate", "context": turn_context}
             if state is State.IMPLEMENTING and party.status == "implementing":
                 context: dict[str, Any] = {
                     "role": party.role,
@@ -677,9 +698,15 @@ class BrokerService:
             if verdict.blocked:
                 self.reject_turn(db, record, party, turn, verdict.reasons, outbox)
                 self.guard(record, party.party_key, verdict, outbox, db, "turns", payload)
+            candidate = (
+                self.patched_contract(db, record, party, turn, outbox)
+                if turn.patches
+                else self.current_contract(db, record)
+            )
+            if turn.status == "ready_to_sign" and (problems := signing_problems(candidate)):
+                self.fail_turn(db, record, party, turn, problems, outbox)
             version_after = record.current_contract_version
             if turn.patches:
-                candidate = self.patched_contract(db, record, party, turn, outbox)
                 version_after = self.store_version(db, record, candidate, party.party_key, outbox)
             self.guard(record, party.party_key, verdict, outbox, db, "turns", payload)
             question_ids = self.create_questions(
@@ -1136,6 +1163,7 @@ class BrokerService:
             )
             self.apply_trigger(db, record, Trigger.CONTRACT_GAP, outbox)
             record.turn_party = party.party_key
+            record.max_rounds = record.round + AMENDMENT_ROUNDS
             for member in self.roles(db, session_id).values():
                 member.status = "amending"
                 member.last_turn_status = None
@@ -1189,18 +1217,41 @@ class BrokerService:
         self.flush(session_id, started)
         try:
             request = self.e2e_request(session_id)
-            report = await asyncio.to_thread(self.e2e_executor.run, request)
+            report, cost_usd = await asyncio.to_thread(self.e2e_executor.run, request)
         except Exception as error:
             logger.exception("end-to-end run failed for %s", session_id)
-            failure = {"scenario": "E2E", "message": f"{type(error).__name__}: {error}"}
-            self.finish_e2e(session_id, None, failure)
+            message = f"{type(error).__name__}: {error}"
+            failure = {
+                "scenarios": [
+                    {
+                        "id": "E2E",
+                        "title": "end-to-end run",
+                        "status": "error",
+                        "failures": [{"message": message}],
+                    }
+                ]
+            }
+            self.finish_e2e(session_id, None, failure, 0.0)
             return
         finally:
             self.gateway.revoke(session_id)
-        self.finish_e2e(session_id, report, None)
+        self.finish_e2e(session_id, report, None, cost_usd)
+
+    def gateway_traffic(self, session_id: str) -> list[dict[str, Any]]:
+        events = self.events.list(session_id, 0)
+        start = max(event["seq"] for event in events if event["type"] == "e2e.started")
+        return [
+            {key: event["payload"].get(key) for key in GATEWAY_FEEDBACK_FIELDS}
+            for event in events
+            if event["type"] == "gateway.request" and event["seq"] > start
+        ]
 
     def finish_e2e(
-        self, session_id: str, report: RunReport | None, failure: dict[str, Any] | None
+        self,
+        session_id: str,
+        report: RunReport | None,
+        failure: dict[str, Any] | None,
+        cost_usd: float,
     ) -> None:
         outbox = Outbox()
         with open_session(self.engine) as db:
@@ -1220,11 +1271,25 @@ class BrokerService:
                     created_at=utc_now(),
                 )
             )
+            db.flush()
+            if cost_usd:
+                self.update_metrics(record, outbox, sandbox_cost_usd=cost_usd)
+                outbox.add(
+                    "sandbox.cost", "broker", {"party": "e2e", "cost_usd": cost_usd}, "observer"
+                )
             outbox.add("e2e.result", "broker", {"passed": passed, "report": sanitized})
+            runs = db.exec(
+                select(TestRunRecord).where(
+                    TestRunRecord.session_id == session_id, TestRunRecord.side == "e2e"
+                )
+            ).all()
             if passed:
                 self.apply_trigger(db, record, Trigger.E2E_PASSED, outbox)
+            elif len(runs) >= MAX_E2E_RUNS:
+                self.apply_trigger(db, record, Trigger.FAILURE, outbox)
             else:
-                record.e2e_feedback_json = json.dumps(sanitized, ensure_ascii=False, default=str)
+                feedback = {"report": sanitized, "gateway": self.gateway_traffic(session_id)}
+                record.e2e_feedback_json = json.dumps(feedback, ensure_ascii=False, default=str)
                 self.apply_trigger(db, record, Trigger.E2E_FAILED, outbox)
             db.add(record)
             db.commit()
@@ -1271,7 +1336,7 @@ class BrokerService:
         self,
         principal: Principal,
         session_id: str,
-        event: PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn,
+        event: PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn | SandboxCostIn,
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
         party_key = principal.party_key or ""
@@ -1285,6 +1350,9 @@ class BrokerService:
                 counter = "blocked_count" if event.type == "egress.blocked" else "redacted_count"
                 self.update_metrics(record, outbox, **{counter: 1})
                 outbox.add(event.type, party_key, payload, party_key)
+            elif isinstance(event, SandboxCostIn):
+                self.update_metrics(record, outbox, sandbox_cost_usd=event.cost_usd)
+                outbox.add(event.type, party_key, payload, "observer")
             else:
                 self.update_metrics(record, outbox, cost_usd=event.cost_usd, tokens=event.tokens)
                 outbox.add(event.type, party_key, payload, "observer")
@@ -1322,12 +1390,34 @@ class BrokerService:
                 else None
             )
         latest = {run.side: run for run in runs}
+        events = self.events.list(session_id)
+        gateway = [event["payload"] for event in events if event["type"] == "gateway.request"]
+        models: dict[str, float] = defaultdict(float)
+        sandboxes: dict[str, float] = defaultdict(float)
+        for event in events:
+            if event["type"] == "llm.call":
+                models[event["payload"]["model"]] += event["payload"]["cost_usd"]
+            elif event["type"] == "sandbox.cost":
+                sandboxes[event["payload"]["party"]] += event["payload"]["cost_usd"]
         return {
             "session_id": session_id,
             "certified": record.state == State.CERTIFIED.value,
             "state": record.state,
             "signed_contract_version": record.signed_contract_version,
+            "contract_sha256": hashlib.sha256(contract_yaml.encode()).hexdigest()
+            if contract_yaml
+            else None,
             "contract_yaml": contract_yaml,
+            "gateway": {
+                "requests": len(gateway),
+                "refused": sum(1 for item in gateway if not item["allowed"]),
+                "schema_violations": sum(len(item.get("violations", [])) for item in gateway),
+            },
+            "costs": {
+                "models": dict(models),
+                "sandboxes": dict(sandboxes),
+                "total_usd": sum(models.values()) + sum(sandboxes.values()),
+            },
             "results": {
                 side: {
                     "party": run.party_key,

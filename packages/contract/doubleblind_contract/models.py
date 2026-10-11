@@ -12,6 +12,7 @@ from pydantic import (
 
 Slug = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9_-]*$")]
 SnakeId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]*$")]
+CtxName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 UpperId = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Za-z0-9_-]*$")]
 SchemaName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_]*$")]
 HeaderName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9-]*$")]
@@ -151,10 +152,12 @@ class SendExpectation(ContractModel):
 
 class SendRequest(ContractModel):
     operation: SnakeId
+    path: dict[str, Any] | None = None
+    query: dict[str, Any] | None = None
     headers: dict[str, str] | None = None
     body: Any = None
     expect: SendExpectation
-    capture: dict[SnakeId, JsonPath] | None = None
+    capture: dict[CtxName, JsonPath] | None = None
 
 
 class EmitExpectation(ContractModel):
@@ -297,7 +300,7 @@ class HttpCall(ContractModel):
     headers: dict[str, str] | None = None
     query: dict[str, str] | None = None
     body: Any = None
-    capture: dict[SnakeId, JsonPath] | None = None
+    capture: dict[CtxName, JsonPath] | None = None
 
 
 class Healthcheck(ContractModel):

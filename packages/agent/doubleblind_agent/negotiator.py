@@ -9,7 +9,7 @@ from doubleblind_agent.broker_client import BrokerClient
 from doubleblind_agent.models import Psm, Turn
 from doubleblind_agent.prompts import CONTRACT_GUIDE, NEGOTIATOR
 from doubleblind_contract.loader import parse_yaml
-from doubleblind_contract.validate import validate_contract_data
+from doubleblind_contract.validate import signing_problems, validate_contract_data
 from doubleblind_llm import LLMClient, LLMRequest, Role
 from doubleblind_llm.errors import StructuredOutputError
 
@@ -19,13 +19,32 @@ INTERNAL_FIXES = 4
 SHOWN_PROBLEMS = 25
 
 
+PATCH_ERRORS = (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException)
+
+
+def applicable_patches(
+    contract: dict[str, Any], patches: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    document, kept = contract, []
+    for patch in patches:
+        variants = [patch, {**patch, "op": "add"}] if patch["op"] == "replace" else [patch]
+        for variant in variants:
+            try:
+                document = jsonpatch.apply_patch(document, [variant])
+            except PATCH_ERRORS:
+                continue
+            kept.append(variant)
+            break
+    return kept
+
+
 def patch_errors(contract: dict[str, Any], turn: Turn) -> list[str]:
-    try:
-        candidate = jsonpatch.apply_patch(contract, turn.patch_list())
-    except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException) as error:
-        return [f"patch: {str(error)[:300]}"]
+    candidate = jsonpatch.apply_patch(contract, applicable_patches(contract, turn.patch_list()))
     candidate = {**candidate, "version": contract["version"] + 1, "status": "proposed"}
-    return [finding.render() for finding in validate_contract_data(candidate).errors]
+    problems = [finding.render() for finding in validate_contract_data(candidate).errors]
+    if turn.status == "ready_to_sign":
+        problems += signing_problems(candidate)
+    return problems
 
 
 async def negotiation_context(broker: BrokerClient) -> dict[str, Any]:
@@ -78,6 +97,13 @@ def messages(
         "Phone numbers and e-mail addresses in examples may only be these synthetic values: "
         + ", ".join([*synthetic["phones"], *synthetic["emails"]]),
     ]
+    if context.get("gap"):
+        gap = context["gap"]
+        parts.append(
+            f"The signed contract could not be implemented: {gap['party']} reported a contract gap "
+            f"in scenarios {', '.join(gap['scenario_ids']) or 'not given'}: {gap['description']}\n"
+            "Fix the contract so both sides can implement and test it, then set ready_to_sign."
+        )
     if feedback:
         parts.append(
             "Your previous attempt was rejected; fix these problems:\n"
@@ -100,7 +126,7 @@ def turn_payload(context: dict[str, Any], turn: Turn) -> dict[str, Any]:
         "round": context["session"]["round"] + 1,
         "based_on_version": context["session"]["current_contract_version"],
         "message": turn.message,
-        "patches": turn.patch_list(),
+        "patches": applicable_patches(context["contract"], turn.patch_list()),
         "questions_for_human": [question.model_dump() for question in turn.questions_for_human],
         "status": turn.status,
     }

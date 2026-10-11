@@ -8,7 +8,9 @@ from typing import Any, Literal
 
 import doubleblind_agent.contract_test_entry as contract_test_entry
 from doubleblind_agent.triage import failing, triage
+from doubleblind_contract.loader import parse_yaml
 from doubleblind_contract.runtime import secret_env_name
+from doubleblind_contract.validate import check_binding_text, validate_contract_data
 from doubleblind_llm import LLMClient
 from doubleblind_sandbox.provider import (
     REPO_DIR,
@@ -22,6 +24,10 @@ from doubleblind_sandbox.provider import (
 ENTRY_SOURCE = Path(contract_test_entry.__file__).read_bytes()
 WORK_DIR = ".doubleblind"
 BINDING_FILE = "doubleblind.binding.yaml"
+FINISH_HINT = (
+    "\n\nAll contract scenarios are green: call finish now. finish also runs the repository "
+    "tests and checks the binding, and tells you what is still missing."
+)
 ALLOWED_COMMANDS = (
     "pytest",
     "python -m pytest",
@@ -207,6 +213,7 @@ class Toolbox:
         self.base_commit = ""
         self.changed: set[str] = set()
         self.last_report: dict[str, Any] | None = None
+        self.green_head: str | None = None
 
     async def shell(self, command: str, persist: bool = False, **options: Any) -> ExecResult:
         env = {**GIT_ENV, **options.pop("env", {})}
@@ -349,7 +356,10 @@ class Toolbox:
             )
             if not failing(report):
                 await self.commit("doubleblind: contract tests green")
-                return f"all {len(report['scenarios'])} scenarios passed\n{statuses}"
+                if not scenarios:
+                    self.green_head = self.workspace.head
+                hint = FINISH_HINT if not scenarios else ""
+                return f"all {len(report['scenarios'])} scenarios passed\n{statuses}{hint}"
             verdict = await triage(self.llm, json.loads(self.scrub(json.dumps(report))), self.party)
             if verdict.category != "ENV_ERROR":
                 break
@@ -377,12 +387,29 @@ class Toolbox:
             if len(row) == 3 and TEST_FILE.search(row[2]) and row[1].isdigit() and row[1] != "0"
         ]
 
+    async def binding_problems(self) -> list[str]:
+        binding, report = check_binding_text(await self.read_text(BINDING_FILE))
+        if binding is None:
+            return [finding.render() for finding in report.errors]
+        contract = parse_yaml(self.contract_yaml)
+        return [
+            finding.message
+            for finding in validate_contract_data(contract, [binding]).errors
+            if finding.path.endswith((".action", ".query"))
+        ]
+
     async def tool_finish(self, summary: str) -> str:
         report = await self.run_contract_tests()
         self.last_report = report
         red = [item["id"] for item in failing(report)]
         if red:
             return f"finish refused: contract scenarios still failing: {', '.join(red)}"
+        missing = await self.binding_problems()
+        if missing:
+            return (
+                "finish refused: the e2e scenarios run against the other company later and need "
+                "these in your binding (with working test hooks):\n" + "\n".join(missing)
+            )
         repo = await self.repo_tests()
         if not repo.ok:
             return f"finish refused: repository tests fail:\n{tail(repo.output(), 60)}"

@@ -117,5 +117,7 @@ class EgressGuard:
             try:
                 return await send(payload)
             except BrokerRejectedError as error:
+                if error.code == "WRONG_STATE":
+                    raise
                 feedback = error.details or [str(error)]
         raise EgressBlockedError(f"{kind} was blocked {MAX_ATTEMPTS} times: {feedback}")

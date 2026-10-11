@@ -1,13 +1,14 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
+from doubleblind_broker.certificate import render_certificate
 from doubleblind_broker.service import (
     AgentEventIn,
     BrokerService,
@@ -176,9 +177,12 @@ def build_router(service: BrokerService) -> APIRouter:
     async def audit(session_id: str, caller: Caller) -> dict[str, Any]:
         return service.audit(caller, session_id)
 
-    @router.get("/sessions/{session_id}/certificate")
-    async def certificate(session_id: str, caller: Caller) -> dict[str, Any]:
-        return service.certificate(caller, session_id)
+    @router.get("/sessions/{session_id}/certificate", response_model=None)
+    async def certificate(
+        session_id: str, caller: Caller, format: Literal["json", "html"] = "json"
+    ) -> dict[str, Any] | HTMLResponse:
+        issued = service.certificate(caller, session_id)
+        return HTMLResponse(render_certificate(issued)) if format == "html" else issued
 
     @router.post("/sessions/{session_id}/isolation-probe")
     async def isolation_probe(session_id: str, caller: Caller) -> dict[str, Any]:
@@ -267,8 +271,4 @@ async def stream(
 
 
 def sse_message(event: dict[str, Any]) -> dict[str, str]:
-    return {
-        "id": str(event["seq"]),
-        "event": event["type"],
-        "data": json.dumps(event, ensure_ascii=False),
-    }
+    return {"id": str(event["seq"]), "data": json.dumps(event, ensure_ascii=False)}

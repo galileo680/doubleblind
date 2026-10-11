@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -17,6 +18,7 @@ from doubleblind_contract.loader import (
     parse_yaml,
     resolve_refs,
 )
+from doubleblind_contract.matcher import OPERATORS
 from doubleblind_contract.models import (
     Binding,
     Contract,
@@ -32,6 +34,7 @@ from doubleblind_contract.models import (
     Step,
 )
 from doubleblind_contract.templating import (
+    TemplateError,
     expression_root,
     is_whole_template,
     parse_expression,
@@ -50,6 +53,13 @@ RULE_STEP_SIDE = "rule 3"
 RULE_UNIQUE_IDS = "rule 4"
 RULE_COVERAGE = "rule 5"
 RULE_STUB_BODY = "rule 6"
+RULE_CONSISTENCY = "rule 7"
+PATH_PARAMETER = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
+SIGNING_SIDES = {
+    "consumer": "what the consumer must send and how it handles webhooks",
+    "provider": "what the provider must accept, reject and emit",
+    "e2e": "the main flow across both companies, steps do/send/expect_state of both parties",
+}
 
 ALLOWED_STEPS: Mapping[Side, frozenset[str]] = {
     "consumer": frozenset({"do", "emit", "expect_received", "expect_no_request", "expect_state"}),
@@ -156,9 +166,20 @@ def step_path(scenario_index: int, step_index: int, step: Step) -> str:
     return f"scenarios[{scenario_index}].steps[{step_index}].{step.kind}"
 
 
+def check_operation_paths(contract: Contract, report: ValidationReport) -> None:
+    for operation_id, operation in contract.operations.items():
+        if "{{" in operation.request.path:
+            report.error(
+                RULE_REFERENCES,
+                f"operations.{operation_id}.request.path",
+                "path parameters are written as {name}, e.g. /shipments/{id}",
+            )
+
+
 def check_references(
     contract: Contract, bindings: Mapping[PartyRole, Binding], report: ValidationReport
 ) -> None:
+    check_operation_paths(contract, report)
     for scenario_index, scenario in enumerate(contract.scenarios):
         for step_index, step in enumerate(scenario.steps):
             path = step_path(scenario_index, step_index, step)
@@ -204,6 +225,15 @@ def check_step_reference(
             f"{path}.operation",
             f"operation '{operation}' does not exist in operations",
         )
+    elif isinstance(step, SendStep):
+        needed = PATH_PARAMETER.findall(contract.operations[step.send.operation].request.path)
+        missing = [name for name in needed if name not in (step.send.path or {})]
+        if missing:
+            report.error(
+                RULE_REFERENCES,
+                f"{path}.path",
+                f"send to '{step.send.operation}' needs path values for {', '.join(missing)}",
+            )
     if webhook is not None and webhook not in contract.webhooks:
         report.error(
             RULE_REFERENCES, f"{path}.webhook", f"webhook '{webhook}' does not exist in webhooks"
@@ -366,6 +396,144 @@ def check_stub_bodies(contract: Contract, report: ValidationReport) -> None:
             )
 
 
+def ctx_names(value: Any) -> set[str]:
+    names = set()
+    for expression in template_expressions(value):
+        try:
+            root, parts = parse_expression(expression)
+        except TemplateError:
+            continue
+        if root == "ctx" and parts and isinstance(parts[0], str):
+            names.add(parts[0])
+    return names
+
+
+def operator_keys(value: Any) -> list[str]:
+    if isinstance(value, Mapping):
+        return [
+            *(key for key in value if isinstance(key, str) and key.startswith("$")),
+            *(key for item in value.values() for key in operator_keys(item)),
+        ]
+    if isinstance(value, list):
+        return [key for item in value for key in operator_keys(item)]
+    return []
+
+
+def check_match_operators(contract: Contract, report: ValidationReport) -> None:
+    for scenario_index, scenario in enumerate(contract.scenarios):
+        for step_index, step in enumerate(scenario.steps):
+            dumped = step.model_dump(mode="json", exclude_unset=True)
+            for key in sorted(set(operator_keys(dumped)) - OPERATORS):
+                report.error(
+                    RULE_CONSISTENCY,
+                    step_path(scenario_index, step_index, step),
+                    f"match operator '{key}' is not supported "
+                    f"(supported: {', '.join(sorted(OPERATORS))})",
+                )
+
+
+def check_ctx_order(contract: Contract, report: ValidationReport) -> None:
+    for scenario_index, scenario in enumerate(contract.scenarios):
+        captured: set[str] = set()
+        after_action = False
+        for step_index, step in enumerate(scenario.steps):
+            path = step_path(scenario_index, step_index, step)
+            used = ctx_names(step.model_dump(mode="json", exclude_unset=True))
+            own = set(step.send.capture or {}) if isinstance(step, SendStep) else set()
+            for name in sorted(used & own):
+                report.error(
+                    RULE_CONSISTENCY,
+                    path,
+                    f"uses ctx.{name} in the same send that captures it; "
+                    "captured values exist only for later steps",
+                )
+            if not after_action:
+                for name in sorted(used - own - captured):
+                    report.error(
+                        RULE_CONSISTENCY,
+                        path,
+                        f"uses ctx.{name} before any earlier step captures it",
+                    )
+            captured |= own
+            after_action = after_action or isinstance(step, DoStep)
+
+
+def schema_branches(schema: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(schema, Mapping):
+        return []
+    branches = [schema]
+    for keyword in ("allOf", "anyOf", "oneOf"):
+        for branch in schema.get(keyword) or []:
+            branches += schema_branches(branch)
+    return branches
+
+
+def unknown_field(schema: Any, parts: Sequence[str]) -> str | None:
+    if not parts:
+        return None
+    branches = schema_branches(schema)
+    head, rest = parts[0], parts[1:]
+    if head.isdigit():
+        items = [branch["items"] for branch in branches if isinstance(branch.get("items"), Mapping)]
+        return unknown_field(items[0], rest) if items else None
+    declared = [branch["properties"] for branch in branches if "properties" in branch]
+    if not declared:
+        return None
+    for properties in declared:
+        if head in properties:
+            return unknown_field(properties[head], rest)
+    return head
+
+
+def match_paths(match: Mapping[str, Any], prefix: str = "") -> list[str]:
+    paths = []
+    for key, value in match.items():
+        full = f"{prefix}{key}"
+        if isinstance(value, Mapping) and value and not any(k.startswith("$") for k in value):
+            paths += match_paths(value, f"{full}.")
+        else:
+            paths.append(full)
+    return paths
+
+
+def check_match_fields(
+    schema: Any, match: Mapping[str, Any] | None, path: str, report: ValidationReport
+) -> None:
+    for dotted in match_paths(match or {}):
+        parts = dotted.split(".")
+        if parts[0] != "body" or schema is None:
+            continue
+        missing = unknown_field(schema, parts[1:])
+        if missing is not None:
+            report.error(
+                RULE_CONSISTENCY,
+                f"{path}.match",
+                f"'{dotted}' is not a field of the body schema ('{missing}' is not declared)",
+            )
+
+
+def check_match_schemas(contract: Contract, report: ValidationReport) -> None:
+    for scenario_index, scenario in enumerate(contract.scenarios):
+        for step_index, step in enumerate(scenario.steps):
+            path = step_path(scenario_index, step_index, step)
+            if isinstance(step, SendStep) and step.send.operation in contract.operations:
+                response = contract.operations[step.send.operation].responses.get(
+                    str(step.send.expect.status)
+                )
+                schema = response.body if response is not None else None
+                check_match_fields(schema, step.send.expect.match, path, report)
+            elif isinstance(step, ExpectReceivedStep) and step.expect_received.operation in (
+                contract.operations
+            ):
+                operation = contract.operations[step.expect_received.operation]
+                check_match_fields(operation.request.body, step.expect_received.match, path, report)
+            elif isinstance(step, ExpectEmittedStep) and step.expect_emitted.webhook in (
+                contract.webhooks
+            ):
+                webhook = contract.webhooks[step.expect_emitted.webhook]
+                check_match_fields(webhook.request.body, step.expect_emitted.match, path, report)
+
+
 def validate_contract_data(
     data: Mapping[str, Any], bindings: Sequence[Binding] = ()
 ) -> ValidationReport:
@@ -385,9 +553,26 @@ def validate_contract_data(
     check_step_sides(contract, report)
     check_unique_ids(contract, report)
     check_decision_coverage(contract, report)
+    check_ctx_order(contract, report)
+    check_match_operators(contract, report)
     if resolved is not None:
         check_stub_bodies(resolved, report)
+        check_match_schemas(resolved, report)
     return report
+
+
+def signing_problems(data: Mapping[str, Any]) -> list[str]:
+    scenarios = data.get("scenarios")
+    sides = {
+        scenario.get("side")
+        for scenario in (scenarios if isinstance(scenarios, list) else [])
+        if isinstance(scenario, dict)
+    }
+    return [
+        f"ready_to_sign needs at least one {side} scenario ({purpose})"
+        for side, purpose in SIGNING_SIDES.items()
+        if side not in sides
+    ]
 
 
 def validate_contract_text(text: str, bindings: Sequence[Binding] = ()) -> ValidationReport:

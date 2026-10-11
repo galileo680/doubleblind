@@ -65,6 +65,7 @@ class ProbeResult:
 
 class SandboxProvider(Protocol):
     name: str
+    spent_usd: float
 
     async def open_workspace(self, party: str, base: str) -> Workspace: ...
 

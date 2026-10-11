@@ -48,6 +48,7 @@ def docker_available() -> bool:
 
 class DockerSandboxProvider:
     name = "docker"
+    spent_usd = 0.0
     python = "python3"
 
     def __init__(self, runner: Runner = run_command) -> None:

@@ -57,6 +57,7 @@ class TokenFactorySandboxProvider:
             transport=transport,
         )
         self.costs = costs
+        self.spent_usd = 0.0
         self.semaphore = asyncio.Semaphore(MAX_CONCURRENT_INSTANCES)
         self.sleep = sleep
 
@@ -197,6 +198,7 @@ class TokenFactorySandboxProvider:
             )
             data = await self.wait(operation, timeout_s + 120)
         result = self.to_result(data, time.monotonic() - started)
+        self.spent_usd += result.cost_usd
         if self.costs is not None:
             self.costs.record(workspace.party, result.cost_usd, command)
         if persist and result.ok and result.new_head:
@@ -284,5 +286,7 @@ class TokenFactorySandboxProvider:
     async def stop_service(self, handle: ServiceHandle) -> None:
         await self.client.delete(f"/v1/operations/{handle.id}")
         data = await self.wait(handle.id, 60)
+        cost = self.to_result(data, 0.0).cost_usd
+        self.spent_usd += cost
         if self.costs is not None:
-            self.costs.record(handle.party, self.to_result(data, 0.0).cost_usd, "service")
+            self.costs.record(handle.party, cost, "service")

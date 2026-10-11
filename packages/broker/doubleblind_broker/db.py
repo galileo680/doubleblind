@@ -30,6 +30,7 @@ class SessionRecord(SQLModel, table=True):
     metrics_json: str = json.dumps(
         {
             "cost_usd": 0.0,
+            "sandbox_cost_usd": 0.0,
             "tokens": 0,
             "code_lines_shared": 0,
             "blocked_count": 0,

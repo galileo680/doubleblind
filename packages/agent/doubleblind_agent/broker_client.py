@@ -34,7 +34,11 @@ class BrokerClient:
         response = await self.http.post(f"{self.session}{path}", json=body)
         if response.status_code in REJECTED:
             error = response.json()
-            raise BrokerRejectedError(error["code"], error["message"], error.get("details"))
+            raise BrokerRejectedError(
+                error.get("code", "INVALID_REQUEST"),
+                error.get("message") or str(error.get("detail"))[:500],
+                error.get("details"),
+            )
         response.raise_for_status()
         return response.json()
 

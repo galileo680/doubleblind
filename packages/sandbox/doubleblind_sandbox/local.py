@@ -65,6 +65,7 @@ def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
 
 class LocalSandboxProvider:
     name = "local"
+    spent_usd = 0.0
     python = f'"{sys.executable}"'
 
     def __init__(self, root: Path, shared: Mapping[str, Path] | None = None) -> None:

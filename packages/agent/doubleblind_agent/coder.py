@@ -39,9 +39,14 @@ def briefing(
         for item in contract.get("decisions", [])
         if item["owner"] == side
     ]
+    end_to_end = [
+        f"{item['id']}: {item['title']}" for item in contract["scenarios"] if item["side"] == "e2e"
+    ]
     parts = [
         f"Signed contract:\n{contract_yaml}",
         "Scenarios of your side:\n" + "\n".join(scenarios),
+        "End-to-end scenarios, run later against the other company's real app; your binding must "
+        f"provide every action and query they use for party {side}:\n" + "\n".join(end_to_end),
         "Decisions owned by your side:\n" + ("\n".join(decisions) or "none"),
         "Where to integrate (private system model):\n"
         + json.dumps([point.model_dump() for point in psm.integration_points], ensure_ascii=False),
@@ -55,7 +60,7 @@ def briefing(
     if e2e_feedback:
         parts.append(
             "The end-to-end test with the other company failed. Sanitized report:\n"
-            + json.dumps(e2e_feedback, ensure_ascii=False)
+            + stable(json.dumps(e2e_feedback, ensure_ascii=False))
         )
     return "\n\n".join(parts)
 
@@ -143,11 +148,16 @@ async def run_coder(
                 return finished.outcome
             messages.append({"role": "tool", "tool_call_id": call.id, "content": stable(result)})
             await progress(step, len(toolbox.changed), note(call.name, toolbox))
-    report = toolbox.last_report
-    if report is not None and all(item["status"] == "passed" for item in report["scenarios"]):
+    if toolbox.green_head is not None:
+        if toolbox.workspace.head != toolbox.green_head:
+            toolbox.workspace.advance(toolbox.green_head)
         try:
-            await toolbox.tool_finish("Step limit reached after a fully green contract test run.")
+            refused = await toolbox.tool_finish(
+                "Step limit reached; finished from the last fully green run."
+            )
         except Finished as finished:
             finished.outcome.transcript = messages
             return finished.outcome
+        return Outcome("stuck", refused, toolbox.last_report, transcript=messages)
+    report = toolbox.last_report
     return Outcome("stuck", f"no finish after {MAX_STEPS} steps", report, transcript=messages)

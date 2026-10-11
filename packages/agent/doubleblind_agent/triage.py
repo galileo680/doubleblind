@@ -27,13 +27,36 @@ def triage_input(report: dict[str, Any]) -> str:
     return stable(json.dumps(failures, ensure_ascii=False))
 
 
+def e2e_triage_input(feedback: dict[str, Any], side: str) -> str:
+    return stable(
+        json.dumps(
+            {
+                "our_side": side,
+                "failing_e2e_scenarios": failing(feedback["report"]),
+                "gateway_traffic": feedback["gateway"],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
 async def triage(llm: LLMClient, report: dict[str, Any], party: str) -> TriageResult:
+    return await classify(llm, triage_input(report), party)
+
+
+async def triage_e2e(
+    llm: LLMClient, feedback: dict[str, Any], party: str, side: str
+) -> TriageResult:
+    return await classify(llm, e2e_triage_input(feedback, side), party)
+
+
+async def classify(llm: LLMClient, content: str, party: str) -> TriageResult:
     response = await llm.complete(
         LLMRequest(
             role=Role.TRIAGE,
             messages=[
                 {"role": "system", "content": TRIAGE.format(party=party)},
-                {"role": "user", "content": triage_input(report)},
+                {"role": "user", "content": content},
             ],
             response_schema=TriageResult.model_json_schema(),
             party=party,

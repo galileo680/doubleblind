@@ -76,6 +76,7 @@
   "$defs": {
     "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$" },
     "snakeId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "ctxName": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
     "upperId": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9_-]*$" },
     "schemaName": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$" },
     "headerName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$" },
@@ -271,6 +272,8 @@
       "additionalProperties": false,
       "properties": {
         "operation": { "$ref": "#/$defs/snakeId" },
+        "path": { "type": "object" },
+        "query": { "type": "object" },
         "headers": {
           "type": "object",
           "additionalProperties": { "type": "string" }
@@ -287,7 +290,7 @@
         },
         "capture": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/snakeId" },
+          "propertyNames": { "$ref": "#/$defs/ctxName" },
           "additionalProperties": { "type": "string", "pattern": "^\\$" }
         }
       }

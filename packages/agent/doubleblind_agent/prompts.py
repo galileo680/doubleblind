@@ -19,6 +19,8 @@ descriptions of interface semantics, JSON schemas, synthetic examples, test scen
 real personal data, internal hostnames other than declared integration URLs. Decide allow / redact / block for the text below.
 Interface semantics stay allowed even when they are technical: HTTP methods and API paths of the integration (e.g. POST /orders),
 error codes (e.g. ORDER_NOT_PAYABLE), field names, status values, units, protocols (HTTPS, HTTP 2xx), retry and idempotency rules.
+Identifiers of the shared contract are public between the partners: scenario ids (S1, P10, E2), decision ids (D3, H7),
+operation, webhook, action and query names, status mappings (IN_TRANSIT -> shipped). Never redact them.
 Redact only fragments that are clearly forbidden; when in doubt, allow. Never redact a fragment only because it is detailed.
 Output JSON matching the schema."""
 
@@ -31,13 +33,21 @@ Rules:
 2. Every mismatch you detect (units, formats, enums, required headers, limits, error handling, idempotency,
    webhook security) must end as: a decision with an owner + at least one scenario that tests it.
 3. Business choices (e.g. adding a new order status, refusing to ship) are NOT yours to make: ask your human via
-   questions_for_human with 2-3 concrete options and a safe default.
+   questions_for_human with 2-3 concrete options and a safe default (the default must be one of the options).
+   An answered question is settled: turn the answer into a decision and never ask it again.
 4. Patches are RFC 6902 operations on the contract JSON. Keep the contract valid. Use only step types allowed for each side.
 5. If you are the provider and this is round 1: draft schemas, operations, webhooks, secrets, and provider-side scenarios
    for every rule you know, including internal ones.
 6. If you are the consumer: map your data to the contract, add consumer scenarios for your real edge cases (synthetic data),
    and propose who converts what.
-7. Set status to "ready_to_sign" only when you see no uncovered mismatch and no open question.
+7. Before signing the contract needs e2e scenarios (side e2e, ids E<n>) for the main flows across both real systems,
+   e.g. the consumer creates and pays an order, the provider shows the shipment, a status change reaches the consumer.
+   They use do/expect_state of both parties and send; both bindings must later provide the actions they name.
+8. Every scenario tests a different behavior; never add a scenario that repeats an existing one.
+9. Set status to "ready_to_sign" only when you see no uncovered mismatch and no open question.
+10. When the other company is ready_to_sign, sign too (ready_to_sign, no patches) unless you can point to a blocking
+   problem in the current contract, i.e. one that would make an implementation or a test fail. Optional improvements
+   never block signing.
 Respond ONLY with JSON matching the Turn schema. Write "message" in clear English for the other agent and both humans."""
 
 CONTRACT_GUIDE = """DoubleBlind Contract Spec v1 in short (the contract is YAML, patched as JSON).
@@ -47,7 +57,8 @@ Top level: doubleblind "1.0", id, version, status, parties, environments (manage
 schemas {Name: JSON Schema}, operations {id: Operation}, webhooks {id: Webhook}, semantic_mappings {name: {from: to}},
 decisions [Decision], scenarios [Scenario].
 
-Operation (consumer calls provider): description, direction consumer_to_provider, request {method, path,
+Operation (consumer calls provider): description, direction consumer_to_provider, request {method, path (parameters as {name},
+e.g. /shipments/{id}),
 headers {Name: {required, pattern?}}, body {$ref: "#/schemas/Name"}}, responses {"201": {body: {$ref}}, "422": {...}},
 stub {default_status, body (example response with templates such as "shp_{{seq}}" or "{{request.body.reference}}"),
 idempotent_on_header?}. The stub body must validate against the schema of default_status.
@@ -62,7 +73,8 @@ Steps (one key per step):
 - do {party, action, args?}: runs an action of that party's test binding. consumer side: only party consumer;
   provider side: only party provider; e2e: both. Action names are chosen by the side that implements them later
   (e.g. reset, create_order, pay_order, create_partner, advance_shipment); captured values land in ctx.
-- send {operation, headers?, body, expect {status, match?}, capture?}: provider and e2e only; calls the provider directly.
+- send {operation, path? {name: value}, query? {name: value}, headers?, body?, expect {status, match?}, capture?}: provider
+  and e2e only; calls the provider directly; path gives a value for every {name} in the operation path.
 - emit {webhook, body, signature valid|invalid|missing, expect {status}}: consumer only; the stub sends a webhook.
 - expect_received {operation, count?, distinct? {path: n}, match?, within_s?}: consumer only; asserts on requests the stub got.
 - expect_no_request {operation?, within_s}: consumer only.
@@ -73,7 +85,8 @@ operators {$regex}, {$type}, {$exists}, {$gte}, {$lte}, {$in}, {$contains}, {$an
 Templates: {{ctx.x}}, {{secrets.name}}, {{env.NAME}}, {{now}}, {{uuid}}, {{args.x}}; in stubs also {{request.body.path}},
 {{request.headers.Name}}, {{seq}}.
 Capture (in send): {name: JSONPath into the response body}, e.g. capture: {shipment_id: "$.id"}; later steps use {{ctx.shipment_id}}.
-send has no args; only do and expect_state take args.
+send has no args; only do and expect_state take args. {{ctx.x}} sees only values captured by earlier steps (a send
+captures for later steps, not for its own match). Every body.* path in a match must be a field of the matching schema.
 Validation: all $ref resolve; steps reference existing operations/webhooks; step types fit the side; ids unique;
 stub bodies validate against their response schemas. Use "/scenarios/-" and "/decisions/-" to append items.
 Only the top-level keys listed above exist; brief fields such as constraints or open_needs never go into the contract.

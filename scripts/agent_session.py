@@ -15,12 +15,15 @@ from eval_negotiation import CONTRACT
 from eval_negotiation import evaluate as evaluate_contract
 from sandbox_party import PARTIES, SandboxKind, base_heads, sandbox_factory
 from scripted_party import ScriptedParty
-from scripted_session import PRESET, running_broker
+from scripted_session import PRESET, dashboard_link, running_broker
 
 from doubleblind_agent.main import PartyConfig, PartyRuntime
 from doubleblind_broker.db import build_engine
+from doubleblind_broker.e2e import SandboxGatewayE2E
 from doubleblind_broker.service import BrokerService, BrokerSettings
 from doubleblind_contract.loader import parse_yaml
+from doubleblind_contract.runtime import free_port
+from doubleblind_sandbox.environment import gateway_url
 from doubleblind_sandbox.local import LocalSandboxProvider
 
 STATE_ROOT = REPO_ROOT / "volumes" / "state"
@@ -38,6 +41,7 @@ ACTIVE_STATES = {
         "IMPLEMENTING",
     },
 }
+ACTIVE_STATES["certified"] = ACTIVE_STATES["implemented"] | {"E2E"}
 ACTIONS = {
     "negotiating": frozenset({"build_psm_and_brief"}),
     "signatures": frozenset({"build_psm_and_brief", "negotiate", "amend"}),
@@ -45,6 +49,7 @@ ACTIONS = {
         {"build_psm_and_brief", "negotiate", "amend", "implement", "fix_after_e2e"}
     ),
 }
+ACTIONS["certified"] = ACTIONS["implemented"]
 CODING_ACTIONS = frozenset({"implement", "fix_after_e2e"})
 HIDDEN_RULES = {
     "pallet above 25 kg": r"pallet|palet",
@@ -151,18 +156,26 @@ def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) 
         autopilot_delay_s=0.0,
         next_action_wait_s=2.0,
     )
-    service = BrokerService(build_engine("sqlite://"), settings)
-    with running_broker(service) as url, httpx.Client(base_url=url, timeout=60.0) as admin:
+    port = int(os.environ.get("BROKER_PORT", "0")) or free_port()
+    gateway = gateway_url(kind, port)
+    executor = SandboxGatewayE2E(factory, gateway) if gateway else None
+    service = BrokerService(build_engine("sqlite://"), settings, executor)
+    host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
+    with (
+        running_broker(service, port, host) as url,
+        httpx.Client(base_url=url, timeout=60.0) as admin,
+    ):
         created = admin.post("/api/v1/sessions", json={"name": "agents", "preset": PRESET}).json()
         session_id, tokens = created["session_id"], created["tokens"]
         observer = {"Authorization": f"Bearer {tokens['observer']}"}
         sessions = f"/api/v1/sessions/{session_id}"
         admin.post(f"{sessions}/start", headers=observer).raise_for_status()
+        print(f"dashboard: {dashboard_link(url, session_id, tokens)}", flush=True)
         actions = ACTIONS[until]
         if scripted:
             negotiate_with_scripts(url, session_id, tokens)
             actions = CODING_ACTIONS
-        if until == "implemented":
+        if until in ("implemented", "certified"):
             for party in PARTIES:
                 (STATE_ROOT / party / "workspace.json").unlink(missing_ok=True)
         runtimes = asyncio.run(run_parties(url, session_id, tokens, bases, factory, until, actions))
@@ -175,6 +188,8 @@ def run_agents(kind: SandboxKind, local_root: Path, until: str, scripted: bool) 
             "turns": admin.get(f"{sessions}/turns", headers=observer).json(),
             "questions": admin.get(f"{sessions}/questions", headers=observer).json(),
             "contract": admin.get(f"{sessions}/contract", headers=observer).text,
+            "certificate": admin.get(f"{sessions}/certificate", headers=observer).json(),
+            "probe": admin.post(f"{sessions}/isolation-probe", headers=observer).json(),
         }
 
 
@@ -280,6 +295,33 @@ def evaluate_implementation(outcome: dict[str, Any]) -> bool:
     return all(results)
 
 
+def evaluate_certification(outcome: dict[str, Any]) -> bool:
+    certificate = outcome["certificate"]
+    gateway = [
+        event["payload"] for event in outcome["events"] if event["type"] == "gateway.request"
+    ]
+    for event in outcome["events"]:
+        if event["type"] == "e2e.result":
+            statuses = [
+                f"{item['id']} {item['status']}"
+                for item in event["payload"]["report"].get("scenarios", [])
+            ]
+            print(f"e2e: passed={event['payload']['passed']} {statuses}")
+    print(f"gateway: {certificate['gateway']}, costs: {certificate['costs']}")
+    results = [
+        check(f"CERTIFIED (state {certificate['state']})", certificate["certified"]),
+        check("E2E traffic went through the gateway", bool(gateway)),
+        check(
+            "every gateway request matched the contract",
+            all(item["allowed"] and not item.get("violations") for item in gateway),
+        ),
+        check("request outside the contract refused", outcome["probe"]["ok"]),
+        check("code_lines_shared == 0", certificate["metrics"]["code_lines_shared"] == 0),
+        check("audit chain verified", certificate["audit"]["ok"]),
+    ]
+    return all(results)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run both party runtimes against the broker")
     parser.add_argument("--sandbox", choices=["local", "tokenfactory", "docker"], default="docker")
@@ -306,8 +348,10 @@ def main() -> None:
         ok = evaluate_briefing(events)
         if arguments.until != "negotiating":
             ok = evaluate_negotiation(outcome) and ok
-    if arguments.until == "implemented":
+    if arguments.until in ("implemented", "certified"):
         ok = evaluate_implementation(outcome) and ok
+    if arguments.until == "certified":
+        ok = evaluate_certification(outcome) and ok
     blocked = [event["payload"] for event in events if event["type"].startswith("egress.")]
     print(f"egress events: {blocked}")
     cost = sum(event["payload"]["cost_usd"] for event in events if event["type"] == "llm.call")

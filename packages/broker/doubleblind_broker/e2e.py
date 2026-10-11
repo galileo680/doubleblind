@@ -46,8 +46,11 @@ class E2ERequest:
     relay_tokens: Mapping[str, str]
 
 
+E2EOutcome = tuple[RunReport, float]
+
+
 class E2EExecutor(Protocol):
-    def run(self, request: E2ERequest) -> RunReport: ...
+    def run(self, request: E2ERequest) -> E2EOutcome: ...
 
 
 def error_report(request: E2ERequest, message: str) -> RunReport:
@@ -94,22 +97,22 @@ def run_with_files(request: E2ERequest, env: Mapping[str, str]) -> RunReport:
 
 
 class UnavailableE2E:
-    def run(self, request: E2ERequest) -> RunReport:
-        return error_report(request, "no end-to-end executor is configured for this broker")
+    def run(self, request: E2ERequest) -> E2EOutcome:
+        return error_report(request, "no end-to-end executor is configured for this broker"), 0.0
 
 
 class LocalProcessE2E:
     def __init__(self, workspaces: Mapping[str, Path]) -> None:
         self.workspaces = {party: Path(path) for party, path in workspaces.items()}
 
-    def run(self, request: E2ERequest) -> RunReport:
+    def run(self, request: E2ERequest) -> E2EOutcome:
         missing = [
             party
             for party in (request.consumer_party, request.provider_party)
             if party not in self.workspaces
         ]
         if missing:
-            return error_report(request, f"no local workspace for {', '.join(missing)}")
+            return error_report(request, f"no local workspace for {', '.join(missing)}"), 0.0
         consumer_binding = self.workspaces[request.consumer_party] / E2E_BINDING_FILE
         provider_binding = self.workspaces[request.provider_party] / E2E_BINDING_FILE
         consumer_binding.write_text(request.consumer_binding, encoding="utf-8")
@@ -117,7 +120,7 @@ class LocalProcessE2E:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             contract_path = Path(directory) / "contract.yaml"
             contract_path.write_text(request.contract_yaml, encoding="utf-8")
-            return run_e2e_tests(
+            report = run_e2e_tests(
                 contract_path,
                 consumer_binding,
                 provider_binding,
@@ -126,6 +129,7 @@ class LocalProcessE2E:
                 ),
                 start_apps=True,
             )
+            return report, 0.0
 
 
 class E2ESetupError(Exception):
@@ -145,11 +149,12 @@ class SandboxGatewayE2E:
         self.sandbox_factory = sandbox_factory
         self.broker_url = broker_url.rstrip("/")
 
-    def run(self, request: E2ERequest) -> RunReport:
+    def run(self, request: E2ERequest) -> E2EOutcome:
         parties = (request.consumer_party, request.provider_party)
         missing = [party for party in parties if party not in request.images]
         if missing:
-            return error_report(request, f"no green workspace image for {', '.join(missing)}")
+            message = f"no green workspace image for {', '.join(missing)}"
+            return error_report(request, message), 0.0
         return asyncio.run(self.execute(request))
 
     def parties(self, request: E2ERequest, env: Mapping[str, str]) -> list[E2EParty]:
@@ -214,7 +219,7 @@ class SandboxGatewayE2E:
                         raise E2ESetupError(f"{party.key}: the app did not become healthy")
                     await asyncio.sleep(HEALTH_RETRY_S)
 
-    async def execute(self, request: E2ERequest) -> RunReport:
+    async def execute(self, request: E2ERequest) -> E2EOutcome:
         gateway = f"{self.broker_url}/gw/{request.session_id}"
         env = e2e_environment(request, {}, lambda party, port: f"{gateway}/{party}")
         parties = self.parties(request, env)
@@ -232,10 +237,11 @@ class SandboxGatewayE2E:
                     )
                 )
             await self.wait_until_healthy(parties)
-            return await asyncio.to_thread(run_with_files, request, {**os.environ, **env})
+            report = await asyncio.to_thread(run_with_files, request, {**os.environ, **env})
         except E2ESetupError as error:
-            return error_report(request, str(error))
+            report = error_report(request, str(error))
         finally:
             for handle in handles:
                 await sandbox.stop_service(handle)
             await sandbox.aclose()
+        return report, sandbox.spent_usd

@@ -1,3 +1,11 @@
+FROM node:24-slim AS dashboard
+
+WORKDIR /dashboard
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci
+COPY dashboard ./
+RUN npm run build
+
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
@@ -9,6 +17,7 @@ COPY packages/sandbox packages/sandbox
 COPY packages/broker packages/broker
 COPY demo/presets demo/presets
 COPY config config
+COPY --from=dashboard /dashboard/dist dashboard/dist
 
 RUN pip install \
     -e packages/llm \
