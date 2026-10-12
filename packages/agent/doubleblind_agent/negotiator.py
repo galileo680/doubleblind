@@ -4,6 +4,7 @@ from importlib.resources import files
 from typing import Any
 
 import jsonpatch
+from pydantic import ValidationError
 
 from doubleblind_agent.broker_client import BrokerClient
 from doubleblind_agent.models import Psm, Turn
@@ -17,6 +18,7 @@ RECENT_TURNS = 10
 EXAMPLE_CONTRACT = files("doubleblind_agent").joinpath("example_contract.yaml").read_text("utf-8")
 INTERNAL_FIXES = 4
 SHOWN_PROBLEMS = 25
+STRUCTURED_ATTEMPTS = 3
 
 
 PATCH_ERRORS = (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException)
@@ -149,11 +151,12 @@ async def propose_turn(
             response_schema=Turn.model_json_schema(),
             party=party,
         )
-        try:
-            response = await llm.complete(request)
-        except StructuredOutputError:
-            response = await llm.complete(request)
-        return Turn.model_validate(response.parsed)
+        for _ in range(STRUCTURED_ATTEMPTS - 1):
+            try:
+                return Turn.model_validate((await llm.complete(request)).parsed)
+            except (StructuredOutputError, ValidationError):
+                continue
+        return Turn.model_validate((await llm.complete(request)).parsed)
 
     def problems_of(candidate: Turn) -> list[str]:
         return patch_errors(context["contract"], candidate) + vet(turn_payload(context, candidate))
@@ -175,7 +178,10 @@ async def propose_turn(
                 "the patches you already wrote; message, questions and status stay as before.",
             },
         ]
-        fix = await ask(conversation, Role.NEGOTIATOR_FIX)
+        try:
+            fix = await ask(conversation, Role.NEGOTIATOR_FIX)
+        except (StructuredOutputError, ValidationError):
+            break
         appended = turn.model_copy(update={"patches": [*turn.patches, *fix.patches]})
         replaced = turn.model_copy(update={"patches": fix.patches})
         turn = min(appended, replaced, key=lambda candidate: len(problems_of(candidate)))

@@ -1,4 +1,5 @@
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -55,6 +56,7 @@ RULE_COVERAGE = "rule 5"
 RULE_STUB_BODY = "rule 6"
 RULE_CONSISTENCY = "rule 7"
 PATH_PARAMETER = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
+MAX_SCENARIOS_PER_SIDE = 10
 SIGNING_SIDES = {
     "consumer": "what the consumer must send and how it handles webhooks",
     "provider": "what the provider must accept, reject and emit",
@@ -568,10 +570,20 @@ def signing_problems(data: Mapping[str, Any]) -> list[str]:
         for scenario in (scenarios if isinstance(scenarios, list) else [])
         if isinstance(scenario, dict)
     }
+    counts = Counter(
+        scenario.get("side")
+        for scenario in (scenarios if isinstance(scenarios, list) else [])
+        if isinstance(scenario, dict)
+    )
     return [
         f"ready_to_sign needs at least one {side} scenario ({purpose})"
         for side, purpose in SIGNING_SIDES.items()
         if side not in sides
+    ] + [
+        f"ready_to_sign allows at most {MAX_SCENARIOS_PER_SIDE} {side} scenarios, found {count}; "
+        "merge scenarios that test the same behavior"
+        for side, count in counts.items()
+        if count > MAX_SCENARIOS_PER_SIDE
     ]
 
 
