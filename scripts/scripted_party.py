@@ -126,56 +126,56 @@ class PlannedTurn:
 PLAN: Mapping[str, list[PlannedTurn]] = {
     "parcelly": [
         PlannedTurn(
-            "Proponuję szkielet: create_shipment i webhook shipment_status_changed "
-            "z podpisem HMAC. Waga w gramach, gabaryt A/B/C według wagi, przesyłki "
-            "powyżej 25 kg tylko przez create_pallet.",
+            "Proposed skeleton: create_shipment and the shipment_status_changed webhook "
+            "signed with HMAC. Weight in grams, size A/B/C by weight, parcels above 25 kg "
+            "only through create_pallet.",
             round_one,
         ),
         PlannedTurn(
-            "Bez Idempotency-Key powstają duplikaty i podwójne opłaty. Proponuję wymagać klucza "
-            "dla Spokes (D4); to zmiana po naszej stronie.",
+            "Without an Idempotency-Key we create duplicates and double charges. We propose "
+            "requiring the key for Spokes (D4); the change is on our side.",
             round_three,
         ),
         PlannedTurn(
-            "Dodaję wymóg odpowiedzi 401 dla błędnego podpisu, mapowanie statusów i scenariusze "
-            "webhooków.",
+            "Adding a 401 response for an invalid signature, the status mapping and webhook "
+            "scenarios.",
             round_five,
         ),
-        PlannedTurn("Gotowi do podpisu na tej wersji.", no_patches, status="ready_to_sign"),
+        PlannedTurn("Ready to sign this version.", no_patches, status="ready_to_sign"),
     ],
     "spokes": [
         PlannedTurn(
-            "Nasza waga jest w kilogramach, adres w jednym polu, a telefon w dowolnym formacie. "
-            "Przejmujemy konwersje (D1, D3, D7).",
+            "Our weight is in kilograms, the address is one field and the phone has any format. "
+            "We take over the conversions (D1, D3, D7).",
             round_two,
             questions=[
                 {
                     "id": "tmp-1",
-                    "text": "Co zrobić z adresami nieparsowalnymi, których nie da się rozbić "
-                    "na pola?",
+                    "text": "What should we do with unparseable addresses that cannot be split "
+                    "into fields?",
                     "options": [
-                        "tak, oznacz do ręcznej weryfikacji i nie wysyłaj",
-                        "wyślij bez rozbicia",
+                        "flag for manual review and do not ship",
+                        "ship without splitting",
                     ],
-                    "default": "tak, oznacz do ręcznej weryfikacji i nie wysyłaj",
+                    "default": "flag for manual review and do not ship",
                 }
             ],
         ),
         PlannedTurn(
-            "Akceptujemy D4, kluczem będzie reference. Mamy rowery cargo ważące 27 kg (D2, S2).",
+            "We accept D4; reference will be the key. We sell cargo bikes weighing 27 kg (D2, S2).",
             round_four,
             questions=[
                 {
                     "id": "tmp-2",
-                    "text": "Czy dodać status zamówienia returned dla zwrotów?",
-                    "options": ["tak", "nie, mapuj na cancelled"],
-                    "default": "tak",
+                    "text": "Should we add an order status returned for returns?",
+                    "options": ["yes", "no, map to cancelled"],
+                    "default": "yes",
                 }
             ],
         ),
         PlannedTurn(
-            "Doprecyzowuję decyzje z odpowiedzi ludzi i dodaję S4, S6 oraz scenariusze E2E. "
-            "Gotowi do podpisu.",
+            "Refining the decisions from the humans' answers and adding S4, S6 and the E2E "
+            "scenarios. Ready to sign.",
             round_six,
             status="ready_to_sign",
             wait_for_answers=True,
@@ -185,19 +185,19 @@ PLAN: Mapping[str, list[PlannedTurn]] = {
 
 BRIEFS: Mapping[str, dict[str, Any]] = {
     "spokes": {
-        "summary": "Sklep rowerowy, który po opłaceniu zamówienia chce automatycznie zamawiać "
-        "przesyłkę u kuriera.",
+        "summary": "A bike shop that wants to book a courier shipment automatically once an "
+        "order is paid.",
         "data_we_have": [
-            "waga w kilogramach",
-            "adres w jednym polu",
-            "telefon w dowolnym formacie",
+            "weight in kilograms",
+            "address in one field",
+            "phone in any format",
         ],
-        "needs": ["utworzenie przesyłki po płatności", "powiadomienia o zmianie statusu"],
+        "needs": ["create a shipment after payment", "status change notifications"],
     },
     "parcelly": {
-        "summary": "Firma kurierska z API przesyłek i palet oraz podpisanymi webhookami.",
-        "data_we_need": ["waga w gramach", "adres w polach", "telefon +48XXXXXXXXX"],
-        "rules": ["limit 25 kg dla przesyłek", "gabaryt zależy od wagi"],
+        "summary": "A courier company with a parcel and pallet API and signed webhooks.",
+        "data_we_need": ["weight in grams", "address split into fields", "phone +447XXXXXXXXX"],
+        "rules": ["25 kg limit for parcels", "size depends on weight"],
     },
 }
 

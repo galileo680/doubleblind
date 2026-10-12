@@ -2,7 +2,7 @@ import json
 import re
 import threading
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 import httpx
@@ -20,6 +20,7 @@ from doubleblind_contract.runtime import ConfigurationError
 from doubleblind_contract.signing import sign
 from doubleblind_contract.templating import TemplateError, render
 
+BASE_PATH = "/provider"
 CONTROL_PREFIX = "/__stub/"
 INVALID_SIGNATURE_SUFFIX = "-invalid"
 
@@ -89,7 +90,7 @@ class ProviderStub:
 
     @property
     def url(self) -> str:
-        return self.server.url
+        return f"{self.server.url}{BASE_PATH}"
 
     def start(self) -> None:
         self.server.start()
@@ -121,6 +122,14 @@ class ProviderStub:
         return None
 
     def handle(self, request: IncomingRequest) -> OutgoingResponse:
+        if not request.path.startswith(f"{BASE_PATH}/"):
+            message = (
+                f"{request.method} {request.path} is outside the provider base URL {self.url}; "
+                "keep the path of the base URL when building request URLs"
+            )
+            self.record(None, request, None, 404, [message])
+            return OutgoingResponse.json(404, {"code": "OUTSIDE_BASE_URL", "message": message})
+        request = replace(request, path=request.path.removeprefix(BASE_PATH))
         if request.path.startswith(CONTROL_PREFIX):
             return self.handle_control(request)
         raw_body = request.body.decode("utf-8", errors="replace")

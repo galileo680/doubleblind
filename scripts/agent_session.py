@@ -6,6 +6,7 @@ import re
 import sys
 import tempfile
 import threading
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -53,14 +54,14 @@ ACTIONS = {
 ACTIONS["certified"] = ACTIONS["implemented"]
 CODING_ACTIONS = frozenset({"implement", "fix_after_e2e"})
 HIDDEN_RULES = {
-    "pallet above 25 kg": r"pallet|palet",
-    "size from weight": r"\bsize\b|gabaryt|SIZE_WEIGHT",
+    "pallet above 25 kg": r"pallet",
+    "size from weight": r"\bsize\b|SIZE_WEIGHT",
     "idempotency": r"idempoten",
-    "postcode matches city": r"(?=.*(postcode|postal|kod))(?=.*(city|miast))",
-    "phone and postcode format": r"\+48|phone|telefon",
-    "signed webhooks": r"signature|hmac|podpis",
+    "postcode matches city": r"(?=.*(postcode|postal))(?=.*city)",
+    "phone and postcode format": r"\+447|E\.164|phone",
+    "signed webhooks": r"signature|hmac",
 }
-SPOKES_QUIRKS = {"address": r"address|adres", "phone": r"phone|telefon", "weight": r"weight|wag"}
+SPOKES_QUIRKS = {"address": r"address", "phone": r"phone", "weight": r"weight"}
 
 
 def found(pattern: str, texts: list[str]) -> bool:
@@ -155,6 +156,8 @@ def run_agents(
     scripted: bool,
     name: str = "agents",
     hold: bool = False,
+    broker: str | None = None,
+    publish: bool = False,
 ) -> dict[str, Any]:
     factory = sandbox_factory(kind, local_root)
     bases = base_heads(kind, local_root)
@@ -172,18 +175,23 @@ def run_agents(
     )
     service = BrokerService(build_engine("sqlite://"), settings, executor, None, probe)
     host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
-    with (
-        running_broker(service, port, host) as url,
-        httpx.Client(base_url=url, timeout=60.0) as admin,
-    ):
-        if kind == "tokenfactory" and gateway:
+    serving = nullcontext(broker.rstrip("/")) if broker else running_broker(service, port, host)
+    admin_token = os.environ.get("DOUBLEBLIND_ADMIN_TOKEN")
+    as_admin = {"Authorization": f"Bearer {admin_token}"} if admin_token else {}
+    with serving as url, httpx.Client(base_url=url, timeout=60.0) as admin:
+        if kind == "tokenfactory" and gateway and broker is None:
             wait_until_reachable(gateway)
-        created = admin.post("/api/v1/sessions", json={"name": name, "preset": PRESET}).json()
+        created = admin.post(
+            "/api/v1/sessions", json={"name": name, "preset": PRESET}, headers=as_admin
+        ).json()
         session_id, tokens = created["session_id"], created["tokens"]
         observer = {"Authorization": f"Bearer {tokens['observer']}"}
         sessions = f"/api/v1/sessions/{session_id}"
         admin.post(f"{sessions}/start", headers=observer).raise_for_status()
         print(f"dashboard: {dashboard_link(url, session_id, tokens)}", flush=True)
+        if publish:
+            public = admin.post(f"{sessions}/publish", headers=as_admin or observer).json()
+            print(f"public: {url}/#/s/{session_id}?observer={public['public_token']}", flush=True)
         actions = ACTIONS[until]
         if scripted:
             negotiate_with_scripts(url, session_id, tokens)

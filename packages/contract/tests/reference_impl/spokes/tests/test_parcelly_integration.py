@@ -20,19 +20,29 @@ SECRET = "test-webhook-secret"
 @pytest.mark.parametrize(
     ("line", "expected"),
     [
-        ("ul. Długa 5/3, 00-001 Warszawa", ParsedAddress("Długa", "5", "3", "00-001", "Warszawa")),
         (
-            "al. Jana Pawła II 12 m. 4, 00-950 Warszawa",
-            ParsedAddress("al. Jana Pawła II", "12", "4", "00-950", "Warszawa"),
-        ),
-        ("Rynek 1, 50-101 Wrocław", ParsedAddress("Rynek", "1", None, "50-101", "Wrocław")),
-        (
-            "os. Tysiąclecia 7/12, 40-871 Katowice",
-            ParsedAddress("os. Tysiąclecia", "7", "12", "40-871", "Katowice"),
+            "Flat 3, 5 Long Street, London E1 6AN",
+            ParsedAddress("Long Street", "5", "3", "E1 6AN", "London"),
         ),
         (
-            "ul. 3 Maja 15A/2, 35-030 Rzeszów",
-            ParsedAddress("3 Maja", "15A", "2", "35-030", "Rzeszów"),
+            "12 St John's Wood Road, Apt 4, London NW8 8RX",
+            ParsedAddress("St John's Wood Road", "12", "4", "NW8 8RX", "London"),
+        ),
+        (
+            "1 Corn Street, Bristol BS1 1HQ",
+            ParsedAddress("Corn Street", "1", None, "BS1 1HQ", "Bristol"),
+        ),
+        (
+            "Flat 12, 7 Millennium Court, Leeds LS6 2AA",
+            ParsedAddress("Millennium Court", "7", "12", "LS6 2AA", "Leeds"),
+        ),
+        (
+            "Unit 5, 84-92 Oxford Street, London W1D 1BS",
+            ParsedAddress("Oxford Street", "84-92", "5", "W1D 1BS", "London"),
+        ),
+        (
+            "Flat 2, 15A 3rd Avenue, Brighton BN3 2PD",
+            ParsedAddress("3rd Avenue", "15A", "2", "BN3 2PD", "Brighton"),
         ),
     ],
 )
@@ -43,8 +53,8 @@ def test_parses_addresses(line: str, expected: ParsedAddress) -> None:
 @pytest.mark.parametrize(
     "line",
     [
-        "Kowalska bez numeru, Warszawa",
-        "ul. Marszałkowska 84/92 lok. 5, 00-514 Warszawa",
+        "Behind the old mill, London",
+        "Flat 3, Long Street, London E1 6AN",
         "",
     ],
 )
@@ -55,11 +65,11 @@ def test_refuses_addresses_it_cannot_split_safely(line: str) -> None:
 @pytest.mark.parametrize(
     ("phone", "expected"),
     [
-        ("600 100 200", "+48600100200"),
-        ("+48600100200", "+48600100200"),
-        ("0048 600-100-200", "+48600100200"),
-        ("(+48) 602-345-678", "+48602345678"),
-        ("48604567890", "+48604567890"),
+        ("07700 900200", "+447700900200"),
+        ("+447700900200", "+447700900200"),
+        ("0044 7700-900200", "+447700900200"),
+        ("(+44) 7700-900345", "+447700900345"),
+        ("447700900567", "+447700900567"),
         ("12345", None),
     ],
 )
@@ -85,20 +95,20 @@ def test_size_follows_the_weight() -> None:
 
 
 def order(**overrides: Any) -> Any:
-    values = {"id": "ORD-1001", "customer_name": "Jan Kowalski", "weight_kg": 14.5}
+    values = {"id": "ORD-1001", "customer_name": "John Smith", "weight_kg": 14.5}
     values.update(overrides)
     return SimpleNamespace(**values)
 
 
 def test_light_orders_become_parcels_and_heavy_ones_pallets() -> None:
-    address = ParsedAddress("Długa", "5", "3", "00-001", "Warszawa")
+    address = ParsedAddress("Long Street", "5", "3", "E1 6AN", "London")
 
-    parcel_path, parcel = build_request(order(), address, "+48600100200")
-    pallet_path, pallet = build_request(order(weight_kg=27.0), address, "+48600100200")
+    parcel_path, parcel = build_request(order(), address, "+447700900200")
+    pallet_path, pallet = build_request(order(weight_kg=27.0), address, "+447700900200")
 
     assert parcel_path == "/v1/shipments"
     assert parcel["parcel"] == {"weight_g": 14500, "size": "B"}
-    assert parcel["receiver"]["address"]["country"] == "PL"
+    assert parcel["receiver"]["address"]["country"] == "GB"
     assert pallet_path == "/v1/pallets"
     assert pallet["pallet"] == {"weight_g": 27000, "pallet_type": "EUR"}
 
@@ -129,15 +139,15 @@ def test_webhook_updates_the_order_status(
     created = client.post(
         "/orders",
         json={
-            "customer_name": "Jan Kowalski",
-            "phone": "600 100 200",
-            "address_line": "ul. Długa 5/3, 00-001 Warszawa",
+            "customer_name": "John Smith",
+            "phone": "07700 900200",
+            "address_line": "Flat 3, 5 Long Street, London E1 6AN",
             "items": [
                 {
                     "sku": "BELL",
                     "name": "Brass bell",
                     "quantity": 1,
-                    "unit_price_gr": 3900,
+                    "unit_price_pence": 3900,
                     "unit_weight_kg": 0.2,
                 }
             ],

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { ChatBubble, useAutoScroll } from "../components/session/Center";
+import { ReplayBar } from "../components/session/Header";
 import { Logo, StateBadge } from "../components/ui";
 import { stopwatch, usd } from "../lib/format";
 import { chat, elapsedMs, LIFECYCLE, matrix } from "../lib/model";
@@ -63,6 +64,7 @@ export function PresentationPage() {
             <div className="v">{usd(cost)}</div>
           </div>
         </div>
+        <ReplayBar />
         <button
           type="button"
           className="btn btn-lg"

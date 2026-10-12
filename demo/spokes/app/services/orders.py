@@ -33,7 +33,7 @@ def create_order(session: Session, payload: OrderCreate) -> Order:
         phone=payload.phone.strip(),
         address_line=payload.address_line.strip(),
         weight_kg=round(sum(item.unit_weight_kg * item.quantity for item in payload.items), 3),
-        total_gr=sum(item.unit_price_gr * item.quantity for item in payload.items),
+        total_pence=sum(item.unit_price_pence * item.quantity for item in payload.items),
         status=OrderStatus.PENDING.value,
         items=[OrderItem(**item.model_dump()) for item in payload.items],
     )

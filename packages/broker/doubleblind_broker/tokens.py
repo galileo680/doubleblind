@@ -3,7 +3,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Literal
 
-PrincipalKind = Literal["agent", "human", "observer", "admin"]
+PrincipalKind = Literal["agent", "human", "observer", "admin", "public"]
 TOKEN_BYTES = 32
 
 
@@ -30,6 +30,6 @@ class Principal:
         return self.kind
 
     def can_see(self, visibility: str) -> bool:
-        if self.kind in ("observer", "admin"):
+        if self.kind in ("observer", "admin", "public"):
             return True
         return visibility == "shared" or visibility == self.party_key

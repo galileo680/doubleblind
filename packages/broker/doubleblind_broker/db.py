@@ -26,6 +26,7 @@ class SessionRecord(SQLModel, table=True):
     current_contract_version: int = 1
     signed_contract_version: int | None = None
     observer_token_hash: str = Field(index=True)
+    public_token: str | None = Field(default=None, index=True)
     secrets_json: str = "{}"
     metrics_json: str = json.dumps(
         {

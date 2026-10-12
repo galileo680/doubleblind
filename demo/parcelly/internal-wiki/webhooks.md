@@ -36,4 +36,4 @@ In sandbox mode (`SANDBOX=1`) status changes are triggered manually:
 - `POST /__sandbox/shipments/{id}/advance` with `{ "to": "COLLECTED" | "IN_TRANSIT" | "DELIVERED" | "RETURNED" }`;
 - `POST /__sandbox/shipments/by-reference/{reference}/advance` with the same body (newest shipment with that reference).
 
-Other sandbox endpoints: `POST /__sandbox/reset` (clears all data), `POST /__sandbox/partners` (`{name, api_key?, flags?}` → `{partner_id, api_key}`), `GET /__sandbox/charges?reference=...` (`{reference, count, total_gr}`).
+Other sandbox endpoints: `POST /__sandbox/reset` (clears all data), `POST /__sandbox/partners` (`{name, api_key?, flags?}` → `{partner_id, api_key}`), `GET /__sandbox/charges?reference=...` (`{reference, count, total_pence}`).

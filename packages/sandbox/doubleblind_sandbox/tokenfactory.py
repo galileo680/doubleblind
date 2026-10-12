@@ -224,7 +224,9 @@ class TokenFactorySandboxProvider:
         response = await self.client.get(f"/v1/inspect/{uuid}/download", params={"path": path})
         if response.status_code == 200:
             return response.content
-        result = await self.run(workspace, f"base64 -w0 '{path}'", cwd="/")
+        result = await self.run(
+            workspace, f"cat '{path}' > /dev/null && base64 -w0 '{path}'", cwd="/"
+        )
         if not result.ok:
             raise SandboxError(f"cannot read {path}: {result.stderr[:200]}")
         return base64.b64decode(result.stdout)

@@ -8,8 +8,8 @@ const MAX_PALLET_WEIGHT_G = 1000000;
 const SIZE_LIMITS_G = Object.freeze({ A: 5000, B: 15000, C: 25000 });
 const ADVANCEABLE_STATUSES = Object.freeze(["COLLECTED", "IN_TRANSIT", "DELIVERED", "RETURNED"]);
 
-const PHONE_PATTERN = /^\+48\d{9}$/;
-const POSTCODE_PATTERN = /^\d{2}-\d{3}$/;
+const PHONE_PATTERN = /^\+447\d{9}$/;
+const POSTCODE_PATTERN = /^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$/;
 
 const text = (maxLength) => ({ type: "string", minLength: 1, maxLength });
 
@@ -23,7 +23,7 @@ const addressSchema = {
     flat: text(20),
     postcode: { type: "string" },
     city: text(80),
-    country: { type: "string", const: "PL" },
+    country: { type: "string", const: "GB" },
   },
 };
 
@@ -131,10 +131,14 @@ function assertSchema(validator, body) {
 
 function assertReceiverFormats(receiver) {
   if (!PHONE_PATTERN.test(receiver.phone)) {
-    throw new ApiError(422, "INVALID_PHONE", "Receiver phone must have the format +48XXXXXXXXX");
+    throw new ApiError(422, "INVALID_PHONE", "Receiver phone must have the format +447XXXXXXXXX");
   }
   if (!POSTCODE_PATTERN.test(receiver.address.postcode)) {
-    throw new ApiError(422, "INVALID_POSTCODE", "Postcode must have the format NN-NNN");
+    throw new ApiError(
+      422,
+      "INVALID_POSTCODE",
+      "Postcode must have the format of a UK postcode, e.g. SW1A 1AA",
+    );
   }
 }
 

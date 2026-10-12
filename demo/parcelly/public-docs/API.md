@@ -1,6 +1,6 @@
 # Parcelly Partner API
 
-Parcelly delivers parcels across Poland. This document describes the API available to partner shops.
+Parcelly delivers parcels across the United Kingdom. This document describes the API available to partner shops.
 
 ## Authentication
 
@@ -20,29 +20,29 @@ A missing or unknown key returns `401 UNAUTHORIZED`.
 {
   "reference": "ORDER-123",
   "receiver": {
-    "name": "Jan Kowalski",
-    "phone": "+48600100200",
+    "name": "John Smith",
+    "phone": "+447700900200",
     "address": {
-      "street": "Długa",
+      "street": "Long Street",
       "building": "5",
       "flat": "3",
-      "postcode": "00-001",
-      "city": "Warszawa",
-      "country": "PL"
+      "postcode": "E1 6AN",
+      "city": "London",
+      "country": "GB"
     }
   },
   "parcel": { "weight_g": 1200, "size": "A" }
 }
 ```
 
-| Field              | Description                                                                                  |
-| ------------------ | -------------------------------------------------------------------------------------------- |
-| `reference`        | Your own identifier of the order, up to 64 characters.                                       |
-| `receiver.name`    | Receiver name.                                                                               |
-| `receiver.phone`   | Mobile number in the format `+48XXXXXXXXX`.                                                  |
-| `receiver.address` | `street`, `building`, optional `flat`, `postcode` (`NN-NNN`), `city`, `country` (only `PL`). |
-| `parcel.weight_g`  | Weight in grams (integer).                                                                   |
-| `parcel.size`      | Parcel size: `A`, `B` or `C`.                                                                |
+| Field              | Description                                                                                                    |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `reference`        | Your own identifier of the order, up to 64 characters.                                                         |
+| `receiver.name`    | Receiver name.                                                                                                 |
+| `receiver.phone`   | Mobile number in the format `+447XXXXXXXXX`.                                                                   |
+| `receiver.address` | `street`, `building`, optional `flat`, `postcode` (UK format, e.g. `SW1A 1AA`), `city`, `country` (only `GB`). |
+| `parcel.weight_g`  | Weight in grams (integer).                                                                                     |
+| `parcel.size`      | Parcel size: `A`, `B` or `C`.                                                                                  |
 
 Response `201 Created`:
 
@@ -52,8 +52,8 @@ Response `201 Created`:
   "service": "parcel",
   "reference": "ORDER-123",
   "status": "CREATED",
-  "tracking_number": "PCL1PL",
-  "price_gr": 1299,
+  "tracking_number": "PCL1GB",
+  "price_pence": 1299,
   "receiver": { "...": "..." },
   "parcel": { "weight_g": 1200, "size": "A" },
   "created_at": "2026-10-06T10:00:00.000Z",
@@ -99,7 +99,7 @@ Webhook requests carry the `X-Parcelly-Signature` header. Ask your account manag
 Errors use one format:
 
 ```json
-{ "code": "INVALID_PHONE", "message": "Receiver phone must have the format +48XXXXXXXXX" }
+{ "code": "INVALID_PHONE", "message": "Receiver phone must have the format +447XXXXXXXXX" }
 ```
 
 | Status | Code                 | Meaning                                        |
@@ -108,8 +108,8 @@ Errors use one format:
 | 400    | `INVALID_JSON`       | The body is not valid JSON.                    |
 | 401    | `UNAUTHORIZED`       | Missing or unknown API key.                    |
 | 404    | `SHIPMENT_NOT_FOUND` | No such shipment.                              |
-| 422    | `INVALID_PHONE`      | Phone is not in the `+48XXXXXXXXX` format.     |
-| 422    | `INVALID_POSTCODE`   | Postcode is not in the `NN-NNN` format.        |
+| 422    | `INVALID_PHONE`      | Phone is not in the `+447XXXXXXXXX` format.    |
+| 422    | `INVALID_POSTCODE`   | Postcode is not a valid UK postcode.           |
 
 ## Test environment
 

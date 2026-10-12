@@ -25,10 +25,10 @@ The database is SQLite. `SPOKES_DATABASE_URL` overrides the default `sqlite:///.
 | `phone` | `str` | As typed by the customer, see below. |
 | `address_line` | `str` | Whole delivery address in one field, see below. |
 | `weight_kg` | `float` | Sum of `unit_weight_kg × quantity` of all items, rounded to 3 decimals. |
-| `total_gr` | `int` | Order value in grosze. |
+| `total_pence` | `int` | Order value in pence (GBP). |
 | `status` | `str` | `pending`, `paid`, `shipped`, `delivered`, `cancelled`. |
 | `created_at`, `paid_at` | `datetime` | UTC, stored without time zone. |
-| `items` | `list[OrderItem]` | `sku`, `name`, `quantity`, `unit_price_gr`, `unit_weight_kg`. |
+| `items` | `list[OrderItem]` | `sku`, `name`, `quantity`, `unit_price_pence`, `unit_weight_kg`. |
 
 ### Status lifecycle
 
@@ -68,18 +68,20 @@ How handlers are called by `POST /orders/{id}/pay`:
 
 Customers type the whole address into one free-text field and we never normalised it. Typical forms:
 
-- `ul. Długa 5/3, 00-001 Warszawa` (building 5, flat 3)
-- `al. Jana Pawła II 12 m. 4, 00-950 Warszawa` (multi-word street name, flat written as `m. 4`)
-- `Rynek 1, 50-101 Wrocław` (no street prefix, no flat)
-- `os. Tysiąclecia 7/12, 40-871 Katowice` (housing estate)
-- `ul. Marszałkowska 84/92 lok. 5, 00-514 Warszawa` (building number `84/92` is one building; the flat is `lok. 5`)
-- `ul. 3 Maja 15A/2, 35-030 Rzeszów` (street name starting with a number, building with a letter)
+- `Flat 3, 5 Long Street, London E1 6AN` (flat 3, building 5)
+- `12 St John's Wood Road, Apt 4, London NW8 8RX` (multi-word street name, flat written after the street as `Apt 4`)
+- `1 Corn Street, Bristol BS1 1HQ` (no flat)
+- `Flat 12, 7 Millennium Court, Leeds LS6 2AA` (block of flats)
+- `Unit 5, 84-92 Oxford Street, London W1D 1BS` (building number `84-92` is one building; the flat is `Unit 5`)
+- `Flat 2, 15A 3rd Avenue, Brighton BN3 2PD` (street name starting with a number, building with a letter)
 
-Some addresses are incomplete, e.g. `Kowalska bez numeru, Warszawa` (no building number, no postcode). The warehouse calls the customer in such cases before shipping.
+The postcode always comes last, after the city, in the UK format with one space (`SW1A 1AA`).
+
+Some addresses are incomplete, e.g. `Behind the old mill, London` (no building number, no postcode). The warehouse calls the customer in such cases before shipping.
 
 ### Phone numbers
 
-Typed in any format: `600 100 200`, `600100200`, `+48600100200`, `+48 601 234 567`, `0048 600-100-200`, `(+48) 602-345-678`, `48604567890`, `607-890-123`. All customers are in Poland.
+Typed in any format: `07700 900200`, `07700900200`, `+447700900200`, `+44 7700 900234`, `0044 7700-900200`, `(+44) 7700-900345`, `447700900567`, `07700-900890`. All customers are in the United Kingdom.
 
 ### Weight
 

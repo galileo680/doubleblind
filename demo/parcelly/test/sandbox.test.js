@@ -98,7 +98,7 @@ describe("sandbox endpoints", () => {
 
   it("report charges for a reference", async () => {
     const empty = await request(app).get("/__sandbox/charges?reference=ORD-1").expect(200);
-    expect(empty.body).toEqual({ reference: "ORD-1", count: 0, total_gr: 0 });
+    expect(empty.body).toEqual({ reference: "ORD-1", count: 0, total_pence: 0 });
     await request(app).get("/__sandbox/charges").expect(400);
   });
 });

@@ -1,6 +1,15 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { PartyView } from "../api/types";
 import { roleTone, type Tone } from "../lib/model";
+import { replayQuestions, replaySession, stepDelay, type ReplaySpeed } from "../lib/replay";
 import { importFromParams, useStoredSession, type StoredSession } from "./sessions";
 import { useSessionData, type SessionData } from "./useSessionData";
 
@@ -13,6 +22,18 @@ export interface ViewOption {
   disabled: boolean;
 }
 
+export interface ReplayControls {
+  active: boolean;
+  playing: boolean;
+  position: number;
+  total: number;
+  speed: ReplaySpeed;
+  start: () => void;
+  toggle: () => void;
+  stop: () => void;
+  setSpeed: (speed: ReplaySpeed) => void;
+}
+
 export interface SessionContextValue {
   id: string;
   stored: StoredSession | undefined;
@@ -23,6 +44,7 @@ export interface SessionContextValue {
   viewOptions: ViewOption[];
   data: SessionData;
   now: number;
+  replay: ReplayControls;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -64,8 +86,10 @@ export function SessionScope({
 
   useEffect(() => {
     if (!importFromParams(id, params)) return;
-    const present = params.get("present") === "1";
-    const clean = `${location.hash.split("?")[0]}${present ? "?present=1" : ""}`;
+    const kept = new URLSearchParams();
+    for (const key of ["present", "replay"])
+      if (params.get(key)) kept.set(key, params.get(key) ?? "");
+    const clean = `${location.hash.split("?")[0]}${kept.size ? `?${kept}` : ""}`;
     history.replaceState(null, "", `${location.pathname}${location.search}${clean}`);
   }, [id, params]);
 
@@ -79,7 +103,67 @@ export function SessionScope({
   }, []);
 
   const token = tokenFor(stored, view);
-  const data = useSessionData(id, token);
+  const live = useSessionData(id, token);
+  const [position, setPosition] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<ReplaySpeed>("normal");
+  const total = live.events.length;
+  const autoplay = useRef(params.get("replay") === "1");
+
+  useEffect(() => {
+    if (autoplay.current && total > 0) {
+      autoplay.current = false;
+      setPosition(1);
+      setPlaying(true);
+    }
+  }, [total]);
+
+  useEffect(() => {
+    if (position === null || !playing) return;
+    if (position >= total) {
+      setPlaying(false);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setPosition((current) => (current ?? 0) + 1),
+      stepDelay(live.events[position], speed),
+    );
+    return () => window.clearTimeout(timer);
+  }, [position, playing, total, speed, live.events]);
+
+  const data = useMemo<SessionData>(() => {
+    if (position === null) return live;
+    const events = live.events.slice(0, position);
+    return {
+      ...live,
+      events,
+      session: live.session ? replaySession(live.session, events) : null,
+      questions: replayQuestions(events),
+    };
+  }, [live, position]);
+
+  const replay: ReplayControls = {
+    active: position !== null,
+    playing,
+    position: position ?? total,
+    total,
+    speed,
+    start: () => {
+      setPosition(1);
+      setPlaying(true);
+    },
+    toggle: () => {
+      if (position !== null && position >= total) setPosition(1);
+      setPlaying((current) => !current);
+    },
+    stop: () => {
+      setPosition(null);
+      setPlaying(false);
+    },
+    setSpeed,
+  };
+  const shownNow =
+    position !== null ? new Date(data.events.at(-1)?.ts ?? Date.now()).getTime() : now;
 
   const setView = (next: string) => {
     sessionStorage.setItem(`doubleblind.view.${id}`, next);
@@ -111,7 +195,18 @@ export function SessionScope({
 
   return (
     <SessionContext.Provider
-      value={{ id, stored, view, setView, token, ownParty, viewOptions, data, now }}
+      value={{
+        id,
+        stored,
+        view,
+        setView,
+        token,
+        ownParty,
+        viewOptions,
+        data,
+        now: shownNow,
+        replay,
+      }}
     >
       {children}
     </SessionContext.Provider>

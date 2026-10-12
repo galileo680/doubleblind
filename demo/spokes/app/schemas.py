@@ -7,7 +7,7 @@ class OrderItemIn(BaseModel):
     sku: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=200)
     quantity: int = Field(ge=1, le=100)
-    unit_price_gr: int = Field(ge=0)
+    unit_price_pence: int = Field(ge=0)
     unit_weight_kg: float = Field(gt=0, le=200)
 
 
@@ -24,7 +24,7 @@ class OrderItemOut(BaseModel):
     sku: str
     name: str
     quantity: int
-    unit_price_gr: int
+    unit_price_pence: int
     unit_weight_kg: float
 
 
@@ -36,7 +36,7 @@ class OrderOut(BaseModel):
     phone: str
     address_line: str
     weight_kg: float
-    total_gr: int
+    total_pence: int
     status: str
     created_at: datetime
     paid_at: datetime | None

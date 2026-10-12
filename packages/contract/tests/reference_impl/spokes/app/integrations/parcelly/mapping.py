@@ -21,11 +21,11 @@ def size_for(weight_g: int) -> str:
 
 def normalize_phone(phone: str) -> str | None:
     digits = re.sub(r"\D", "", phone)
-    if len(digits) == 9:
-        return f"+48{digits}"
-    if len(digits) == 11 and digits.startswith("48"):
+    if len(digits) == 11 and digits.startswith("07"):
+        return f"+44{digits[1:]}"
+    if len(digits) == 12 and digits.startswith("447"):
         return f"+{digits}"
-    if len(digits) == 13 and digits.startswith("0048"):
+    if len(digits) == 14 and digits.startswith("00447"):
         return f"+{digits[2:]}"
     return None
 

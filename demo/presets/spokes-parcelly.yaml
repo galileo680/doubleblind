@@ -4,25 +4,25 @@ consumer: { party: spokes, display_name: "Spokes (bike shop)", workspace: demo/s
 provider: { party: parcelly, display_name: "Parcelly (courier)", workspace: demo/parcelly }
 synthetic_allowlist:
   phones:
-    - "600 100 200"
-    - "+48600100200"
-    - "0048 600-100-200"
-    - "+48500200300"
-    - "+48600100201"
-    - "+48600100202"
-    - "+48600100203"
-    - "+48600100204"
-    - "+48600100205"
-  emails: ["jan.kowalski@example.com"]
+    - "07700 900200"
+    - "+447700900200"
+    - "0044 7700-900200"
+    - "+447700900300"
+    - "+447700900201"
+    - "+447700900202"
+    - "+447700900203"
+    - "+447700900204"
+    - "+447700900205"
+  emails: ["john.smith@example.com"]
 autopilot_answers:
-  - match: ["returned", "zwrot"]
-    answer: "tak"
-  - match: ["needs_review", "ręczn", "nieparsowal"]
-    answer: "tak, oznacz do ręcznej weryfikacji i nie wysyłaj"
+  - match: ["returned", "return"]
+    answer: "yes"
+  - match: ["needs_review", "manual review", "unparseable"]
+    answer: "flag for manual review and do not ship"
   - match: ["idempotency", "Idempotency-Key"]
-    answer: "tak, wymagaj klucza dla tego partnera"
-  - match: ["zaokrągl", "round"]
-    answer: "w górę do pełnego grama"
+    answer: "yes, require the key for this partner"
+  - match: ["round"]
+    answer: "round up to a whole gram"
 personas:
   consumer: "careful owner of an online bike shop"
   provider: "partner onboarding manager at a courier company"

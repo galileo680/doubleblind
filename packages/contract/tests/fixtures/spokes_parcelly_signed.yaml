@@ -9,11 +9,11 @@ environments:
   provider_base_url: "${PROVIDER_BASE_URL}"
   consumer_webhook_url: "${CONSUMER_WEBHOOK_URL}"
 secrets:
-  - { name: partner_api_key, description: "Klucz partnera wydany przez Parcelly" }
-  - { name: webhook_secret,  description: "Sekret HMAC do podpisu webhooków" }
+  - { name: partner_api_key, description: "Partner key issued by Parcelly" }
+  - { name: webhook_secret,  description: "HMAC secret for signing webhooks" }
 glossary:
-  weight_g: "Masa przesyłki w gramach (liczba całkowita)"
-  reference: "Identyfikator zamówienia po stronie konsumenta; unikalny; służy też jako klucz idempotencji"
+  weight_g: "Parcel weight in grams (integer)"
+  reference: "Order identifier on the consumer side; unique; also used as the idempotency key"
 
 schemas:
   Address:
@@ -24,16 +24,16 @@ schemas:
       street:   { type: string, minLength: 1 }
       building: { type: string, minLength: 1 }
       flat:     { type: string, minLength: 1 }
-      postcode: { type: string, pattern: "^\\d{2}-\\d{3}$" }
+      postcode: { type: string, pattern: "^[A-Z]{1,2}\\d[A-Z\\d]? \\d[A-Z]{2}$" }
       city:     { type: string, minLength: 1 }
-      country:  { const: PL }
+      country:  { const: GB }
   Receiver:
     type: object
     required: [name, phone, address]
     additionalProperties: false
     properties:
       name:    { type: string, minLength: 1 }
-      phone:   { type: string, pattern: "^\\+48\\d{9}$" }
+      phone:   { type: string, pattern: "^\\+447\\d{9}$" }
       address: { $ref: "#/schemas/Address" }
   CreateShipmentRequest:
     type: object
@@ -71,7 +71,7 @@ schemas:
       reference:       { type: string }
       status:          { enum: [CREATED, COLLECTED, IN_TRANSIT, DELIVERED, RETURNED] }
       tracking_number: { type: string }
-      price_gr:        { type: integer }
+      price_pence:     { type: integer }
   Error:
     type: object
     required: [code, message]
@@ -90,7 +90,7 @@ schemas:
 
 operations:
   create_shipment:
-    description: "Przesyłka standardowa do 25 kg"
+    description: "Standard parcel up to 25 kg"
     direction: consumer_to_provider
     request:
       method: POST
@@ -106,9 +106,9 @@ operations:
     stub:
       default_status: 201
       idempotent_on_header: Idempotency-Key
-      body: { id: "shp_{{seq}}", reference: "{{request.body.reference}}", status: CREATED, tracking_number: "PCL{{seq}}PL", price_gr: 1599 }
+      body: { id: "shp_{{seq}}", reference: "{{request.body.reference}}", status: CREATED, tracking_number: "PCL{{seq}}GB", price_pence: 1599 }
   create_pallet:
-    description: "Przesyłka paletowa powyżej 25 kg"
+    description: "Pallet shipment above 25 kg"
     direction: consumer_to_provider
     request:
       method: POST
@@ -124,7 +124,7 @@ operations:
     stub:
       default_status: 201
       idempotent_on_header: Idempotency-Key
-      body: { id: "plt_{{seq}}", reference: "{{request.body.reference}}", status: CREATED, tracking_number: "PAL{{seq}}PL", price_gr: 8900 }
+      body: { id: "plt_{{seq}}", reference: "{{request.body.reference}}", status: CREATED, tracking_number: "PAL{{seq}}GB", price_pence: 8900 }
 
 webhooks:
   shipment_status_changed:
@@ -147,23 +147,23 @@ semantic_mappings:
     RETURNED: returned
 
 decisions:
-  - { id: D1, text: "Konsument przelicza kg na g, zaokrąglając w górę do pełnego grama; minimum 1 g.", owner: consumer, approved_by: [spokes, parcelly] }
-  - { id: D2, text: "Przesyłki powyżej 25000 g konsument wysyła operacją create_pallet.", owner: consumer, approved_by: [spokes, parcelly] }
-  - { id: D3, text: "Gabaryt wyznacza konsument z wagi: A <= 5000 g, B <= 15000 g, C <= 25000 g.", owner: consumer, approved_by: [spokes, parcelly] }
-  - { id: D4, text: "Parcelly wymaga Idempotency-Key dla tego partnera; brak klucza = 400 IDEMPOTENCY_KEY_REQUIRED. Konsument używa reference jako klucza.", owner: provider, approved_by: [spokes, parcelly] }
-  - { id: D5, text: "Konsument rozbija adres na pola; gdy rozbicie jest niepewne, zamówienie dostaje status needs_review i nie jest wysyłane.", owner: consumer, approved_by: [spokes, parcelly] }
-  - { id: D6, text: "Konsument dodaje status zamówienia returned (mapowanie z RETURNED).", owner: consumer, approved_by: [spokes, parcelly] }
-  - { id: D7, text: "Konsument normalizuje telefon do formatu +48XXXXXXXXX.", owner: consumer, approved_by: [spokes, parcelly] }
-  - { id: D8, text: "Konsument odrzuca webhook z niepoprawnym podpisem kodem 401 i nie zmienia stanu.", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D1, text: "The consumer converts kg to g, rounding up to a whole gram; minimum 1 g.", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D2, text: "The consumer sends shipments above 25000 g with the create_pallet operation.", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D3, text: "The consumer derives the size from the weight: A <= 5000 g, B <= 15000 g, C <= 25000 g.", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D4, text: "Parcelly requires an Idempotency-Key for this partner; a missing key = 400 IDEMPOTENCY_KEY_REQUIRED. The consumer uses reference as the key.", owner: provider, approved_by: [spokes, parcelly] }
+  - { id: D5, text: "The consumer splits the address into fields; when the split is uncertain, the order gets status needs_review and is not shipped.", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D6, text: "The consumer adds the order status returned (mapped from RETURNED).", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D7, text: "The consumer normalizes the phone number to +447XXXXXXXXX.", owner: consumer, approved_by: [spokes, parcelly] }
+  - { id: D8, text: "The consumer rejects a webhook with an invalid signature with 401 and does not change state.", owner: consumer, approved_by: [spokes, parcelly] }
 
 scenarios:
   - id: S1
-    title: "Rower 14,5 kg -> create_shipment, 14500 g, gabaryt B, telefon znormalizowany"
+    title: "14.5 kg bike -> create_shipment, 14500 g, size B, normalized phone"
     side: consumer
     covers: [D1, D3, D7, create_shipment]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 14.5, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 14.5, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith" } }
       - do: { party: consumer, action: pay_order }
       - expect_received:
           operation: create_shipment
@@ -173,78 +173,78 @@ scenarios:
             headers.Idempotency-Key: "{{ctx.order_id}}"
             body.reference: "{{ctx.order_id}}"
             body.parcel: { weight_g: 14500, size: B }
-            body.receiver.phone: "+48600100200"
-            body.receiver.address: { street: "Długa", building: "5", flat: "3", postcode: "00-001", city: "Warszawa", country: PL }
+            body.receiver.phone: "+447700900200"
+            body.receiver.address: { street: "Long Street", building: "5", flat: "3", postcode: "E1 6AN", city: "London", country: GB }
   - id: S2
-    title: "Rower cargo 27 kg -> create_pallet"
+    title: "27 kg cargo bike -> create_pallet"
     side: consumer
     covers: [D2, create_pallet]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 27.0, address_line: "Rynek 1, 50-101 Wrocław", phone: "+48500200300", customer_name: "Anna Nowak" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 27.0, address_line: "1 Corn Street, Bristol BS1 1HQ", phone: "+447700900300", customer_name: "Emma Brown" } }
       - do: { party: consumer, action: pay_order }
       - expect_received: { operation: create_pallet, count: 1, within_s: 5, match: { body.pallet: { weight_g: 27000, pallet_type: EUR } } }
       - expect_no_request: { operation: create_shipment, within_s: 1 }
   - id: S3
-    title: "Podwójne zdarzenie opłacenia -> jeden klucz idempotencji"
+    title: "Duplicate payment event -> one idempotency key"
     side: consumer
     covers: [D4]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 3.2, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 3.2, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith" } }
       - do: { party: consumer, action: pay_order }
       - do: { party: consumer, action: pay_order }
       - expect_received: { operation: create_shipment, within_s: 5, distinct: { headers.Idempotency-Key: 1 }, match: { body.parcel.size: A } }
   - id: S4
-    title: "Wieloczłonowa nazwa ulicy i lokal 'm.'"
+    title: "Multi-word street name and flat written as 'Apt'"
     side: consumer
     covers: [D5]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 9.9, address_line: "al. Jana Pawła II 12 m. 4, 00-950 Warszawa", phone: "0048 600-100-200", customer_name: "Jan Kowalski" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 9.9, address_line: "12 St John's Wood Road, Apt 4, London NW8 8RX", phone: "0044 7700-900200", customer_name: "John Smith" } }
       - do: { party: consumer, action: pay_order }
       - expect_received:
           operation: create_shipment
           count: 1
           within_s: 5
           match:
-            body.receiver.address: { street: "al. Jana Pawła II", building: "12", flat: "4", postcode: "00-950", city: "Warszawa" }
-            body.receiver.phone: "+48600100200"
+            body.receiver.address: { street: "St John's Wood Road", building: "12", flat: "4", postcode: "NW8 8RX", city: "London" }
+            body.receiver.phone: "+447700900200"
   - id: S5
-    title: "Lekka paczka 0,3 kg -> 300 g (nie 0)"
+    title: "Light 0.3 kg parcel -> 300 g (not 0)"
     side: consumer
     covers: [D1]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 0.3, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 0.3, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith" } }
       - do: { party: consumer, action: pay_order }
       - expect_received: { operation: create_shipment, count: 1, within_s: 5, match: { body.parcel: { weight_g: 300, size: A } } }
   - id: S6
-    title: "Adres nieparsowalny -> needs_review, brak wysyłki"
+    title: "Unparseable address -> needs_review, nothing shipped"
     side: consumer
     covers: [D5]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 5.0, address_line: "Kowalska bez numeru, Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 5.0, address_line: "Behind the old mill, London", phone: "07700 900200", customer_name: "John Smith" } }
       - do: { party: consumer, action: pay_order }
       - expect_no_request: { within_s: 2 }
       - expect_state: { party: consumer, query: order, match: { status: needs_review } }
   - id: S7
-    title: "Webhook DELIVERED z poprawnym podpisem -> delivered"
+    title: "DELIVERED webhook with a valid signature -> delivered"
     side: consumer
     covers: [shipment_status_changed]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 2.0, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski", status: shipped, shipment_id: "shp_77" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 2.0, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith", status: shipped, shipment_id: "shp_77" } }
       - emit: { webhook: shipment_status_changed, signature: valid, body: { event: shipment.status_changed, shipment_id: "shp_77", reference: "{{ctx.order_id}}", status: DELIVERED, occurred_at: "{{now}}" }, expect: { status: 200 } }
       - expect_state: { party: consumer, query: order, match: { status: delivered } }
   - id: S8
-    title: "Webhook z błędnym podpisem -> 401 i brak zmiany"
+    title: "Webhook with an invalid signature -> 401 and no change"
     side: consumer
     covers: [D8]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 2.0, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski", status: shipped, shipment_id: "shp_78" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 2.0, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith", status: shipped, shipment_id: "shp_78" } }
       - emit: { webhook: shipment_status_changed, signature: invalid, body: { event: shipment.status_changed, shipment_id: "shp_78", reference: "{{ctx.order_id}}", status: DELIVERED, occurred_at: "{{now}}" }, expect: { status: 401 } }
       - expect_state: { party: consumer, query: order, match: { status: shipped } }
   - id: S9
@@ -253,12 +253,12 @@ scenarios:
     covers: [D6]
     steps:
       - do: { party: consumer, action: reset }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 2.0, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski", status: shipped, shipment_id: "shp_79" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 2.0, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith", status: shipped, shipment_id: "shp_79" } }
       - emit: { webhook: shipment_status_changed, signature: valid, body: { event: shipment.status_changed, shipment_id: "shp_79", reference: "{{ctx.order_id}}", status: RETURNED, occurred_at: "{{now}}" }, expect: { status: 200 } }
       - expect_state: { party: consumer, query: order, match: { status: returned } }
 
   - id: P1
-    title: "Brak Idempotency-Key -> 400 IDEMPOTENCY_KEY_REQUIRED"
+    title: "Missing Idempotency-Key -> 400 IDEMPOTENCY_KEY_REQUIRED"
     side: provider
     covers: [D4]
     steps:
@@ -267,10 +267,10 @@ scenarios:
       - send:
           operation: create_shipment
           headers: { Authorization: "Bearer {{ctx.api_key}}" }
-          body: { reference: "ORD-P1", receiver: { name: "Jan Kowalski", phone: "+48600100200", address: { street: "Długa", building: "5", flat: "3", postcode: "00-001", city: "Warszawa", country: PL } }, parcel: { weight_g: 1000, size: A } }
+          body: { reference: "ORD-P1", receiver: { name: "John Smith", phone: "+447700900200", address: { street: "Long Street", building: "5", flat: "3", postcode: "E1 6AN", city: "London", country: GB } }, parcel: { weight_g: 1000, size: A } }
           expect: { status: 400, match: { body.code: IDEMPOTENCY_KEY_REQUIRED } }
   - id: P2
-    title: "Waga 25001 g na /v1/shipments -> 422 WEIGHT_LIMIT_EXCEEDED"
+    title: "25001 g on /v1/shipments -> 422 WEIGHT_LIMIT_EXCEEDED"
     side: provider
     covers: [D2]
     steps:
@@ -279,10 +279,10 @@ scenarios:
       - send:
           operation: create_shipment
           headers: { Authorization: "Bearer {{ctx.api_key}}", Idempotency-Key: "ORD-P2" }
-          body: { reference: "ORD-P2", receiver: { name: "Jan Kowalski", phone: "+48600100200", address: { street: "Długa", building: "5", postcode: "00-001", city: "Warszawa", country: PL } }, parcel: { weight_g: 25001, size: C } }
+          body: { reference: "ORD-P2", receiver: { name: "John Smith", phone: "+447700900200", address: { street: "Long Street", building: "5", postcode: "E1 6AN", city: "London", country: GB } }, parcel: { weight_g: 25001, size: C } }
           expect: { status: 422, match: { body.code: WEIGHT_LIMIT_EXCEEDED } }
   - id: P3
-    title: "Ten sam Idempotency-Key dwa razy -> ta sama przesyłka, jedna opłata"
+    title: "Same Idempotency-Key twice -> same shipment, one charge"
     side: provider
     covers: [D4]
     steps:
@@ -291,17 +291,17 @@ scenarios:
       - send:
           operation: create_shipment
           headers: { Authorization: "Bearer {{ctx.api_key}}", Idempotency-Key: "ORD-P3" }
-          body: { reference: "ORD-P3", receiver: { name: "Jan Kowalski", phone: "+48600100200", address: { street: "Długa", building: "5", postcode: "00-001", city: "Warszawa", country: PL } }, parcel: { weight_g: 1000, size: A } }
+          body: { reference: "ORD-P3", receiver: { name: "John Smith", phone: "+447700900200", address: { street: "Long Street", building: "5", postcode: "E1 6AN", city: "London", country: GB } }, parcel: { weight_g: 1000, size: A } }
           expect: { status: 201 }
           capture: { shipment_id: "$.id" }
       - send:
           operation: create_shipment
           headers: { Authorization: "Bearer {{ctx.api_key}}", Idempotency-Key: "ORD-P3" }
-          body: { reference: "ORD-P3", receiver: { name: "Jan Kowalski", phone: "+48600100200", address: { street: "Długa", building: "5", postcode: "00-001", city: "Warszawa", country: PL } }, parcel: { weight_g: 1000, size: A } }
+          body: { reference: "ORD-P3", receiver: { name: "John Smith", phone: "+447700900200", address: { street: "Long Street", building: "5", postcode: "E1 6AN", city: "London", country: GB } }, parcel: { weight_g: 1000, size: A } }
           expect: { status: 201, match: { body.id: "{{ctx.shipment_id}}" } }
       - expect_state: { party: provider, query: charges, args: { reference: "ORD-P3" }, match: { count: 1 } }
   - id: P4
-    title: "Zmiana statusu -> podpisany webhook zgodny ze schematem"
+    title: "Status change -> signed webhook matching the schema"
     side: provider
     covers: [shipment_status_changed]
     steps:
@@ -311,32 +311,32 @@ scenarios:
       - send:
           operation: create_shipment
           headers: { Authorization: "Bearer {{ctx.api_key}}", Idempotency-Key: "ORD-P4" }
-          body: { reference: "ORD-P4", receiver: { name: "Jan Kowalski", phone: "+48600100200", address: { street: "Długa", building: "5", postcode: "00-001", city: "Warszawa", country: PL } }, parcel: { weight_g: 1000, size: A } }
+          body: { reference: "ORD-P4", receiver: { name: "John Smith", phone: "+447700900200", address: { street: "Long Street", building: "5", postcode: "E1 6AN", city: "London", country: GB } }, parcel: { weight_g: 1000, size: A } }
           expect: { status: 201 }
           capture: { shipment_id: "$.id" }
       - do: { party: provider, action: advance_shipment, args: { to: DELIVERED } }
       - expect_emitted: { webhook: shipment_status_changed, count: 1, signature: valid, within_s: 5, match: { body.status: DELIVERED, body.reference: "ORD-P4" } }
 
   - id: E1
-    title: "Zamówienie opłacone -> przesyłka u kuriera -> doręczenie widoczne w sklepie"
+    title: "Order paid -> shipment at the courier -> delivery visible in the shop"
     side: e2e
     steps:
       - do: { party: provider, action: reset }
       - do: { party: consumer, action: reset }
       - do: { party: provider, action: create_partner, args: { name: "spokes", api_key: "{{secrets.partner_api_key}}", flags: { require_idempotency_key: true } } }
       - do: { party: provider, action: register_webhook, args: { url: "{{env.CONSUMER_WEBHOOK_URL}}", secret: "{{secrets.webhook_secret}}" } }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 14.5, address_line: "ul. Długa 5/3, 00-001 Warszawa", phone: "600 100 200", customer_name: "Jan Kowalski" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 14.5, address_line: "Flat 3, 5 Long Street, London E1 6AN", phone: "07700 900200", customer_name: "John Smith" } }
       - do: { party: consumer, action: pay_order }
       - expect_state: { party: provider, query: shipment_by_reference, args: { reference: "{{ctx.order_id}}" }, match: { status: CREATED }, eventually: { timeout_s: 10, interval_s: 0.5 } }
       - do: { party: provider, action: advance_shipment_by_reference, args: { reference: "{{ctx.order_id}}", to: DELIVERED } }
       - expect_state: { party: consumer, query: order, match: { status: delivered }, eventually: { timeout_s: 10, interval_s: 0.5 } }
   - id: E2
-    title: "Rower cargo 27 kg -> paleta u kuriera"
+    title: "27 kg cargo bike -> pallet at the courier"
     side: e2e
     steps:
       - do: { party: provider, action: reset }
       - do: { party: consumer, action: reset }
       - do: { party: provider, action: create_partner, args: { name: "spokes", api_key: "{{secrets.partner_api_key}}", flags: { require_idempotency_key: true } } }
-      - do: { party: consumer, action: create_order, args: { weight_kg: 27.0, address_line: "Rynek 1, 50-101 Wrocław", phone: "+48500200300", customer_name: "Anna Nowak" } }
+      - do: { party: consumer, action: create_order, args: { weight_kg: 27.0, address_line: "1 Corn Street, Bristol BS1 1HQ", phone: "+447700900300", customer_name: "Emma Brown" } }
       - do: { party: consumer, action: pay_order }
       - expect_state: { party: provider, query: shipment_by_reference, args: { reference: "{{ctx.order_id}}" }, match: { id: { $regex: "^plt_" }, status: CREATED }, eventually: { timeout_s: 10, interval_s: 0.5 } }

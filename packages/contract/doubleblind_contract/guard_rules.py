@@ -23,7 +23,7 @@ WORD_SEPARATOR = re.compile(r"[_-]")
 MIN_RANDOM_SEGMENT = 20
 DIGIT = re.compile(r"\d")
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-PHONE = re.compile(r"(?<![\w+])(?:\+48|0048)?[ -]?\d{3}[ -]?\d{3}[ -]?\d{3}(?!\w)")
+PHONE = re.compile(r"(?<![\w+])(?:(?:\+44|0044)[ -]?|0)?7\d{3}[ -]?\d{3}[ -]?\d{3}(?!\w)")
 STACK_TRACES = (
     re.compile(r"Traceback \(most recent call last\)"),
     re.compile(r"at .* \(.*:\d+:\d+\)"),
@@ -38,10 +38,12 @@ FieldPath = tuple[str | int, ...]
 
 def normalize_phone(text: str) -> str:
     digits = re.sub(r"\D", "", text)
-    if len(digits) == 13 and digits.startswith("0048"):
+    if len(digits) == 14 and digits.startswith("0044"):
         return digits[4:]
-    if len(digits) == 11 and digits.startswith("48"):
+    if len(digits) == 12 and digits.startswith("44"):
         return digits[2:]
+    if len(digits) == 11 and digits.startswith("0"):
+        return digits[1:]
     return digits
 
 

@@ -126,6 +126,15 @@ export interface ProbeReport {
   results: ProbeResult[];
 }
 
+export interface PublicSession {
+  session_id: string;
+  name: string;
+  state: SessionState;
+  created_at: string;
+  token: string;
+  parties: string[];
+}
+
 export interface CreatedSession {
   session_id: string;
   tokens: Record<string, string>;

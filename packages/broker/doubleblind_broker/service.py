@@ -263,6 +263,11 @@ class BrokerService:
             ).first()
             if observer is not None:
                 return Principal("observer", observer.id)
+            published = db.exec(
+                select(SessionRecord).where(SessionRecord.public_token == token)
+            ).first()
+            if published is not None:
+                return Principal("public", published.id)
             agent = db.exec(
                 select(PartyRecord).where(PartyRecord.agent_token_hash == hashed)
             ).first()
@@ -513,6 +518,37 @@ class BrokerService:
             db.commit()
         self.flush(session_id, outbox)
         return self.session_view(principal, session_id)
+
+    def publish(self, principal: Principal, session_id: str) -> dict[str, Any]:
+        if self.settings.admin_token and principal.kind != "admin":
+            raise BrokerError(403, "FORBIDDEN", "publishing a session needs the admin token")
+        self.authorize(principal, session_id, "observer", "admin")
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            if record.public_token is None:
+                record.public_token = new_token()
+                db.add(record)
+                db.commit()
+            return {"session_id": session_id, "public_token": record.public_token}
+
+    def public_sessions(self) -> list[dict[str, Any]]:
+        with open_session(self.engine) as db:
+            records = db.exec(
+                select(SessionRecord)
+                .where(col(SessionRecord.public_token).is_not(None))
+                .order_by(col(SessionRecord.created_at).desc())
+            ).all()
+            return [
+                {
+                    "session_id": record.id,
+                    "name": record.name,
+                    "state": record.state,
+                    "created_at": record.created_at,
+                    "token": record.public_token,
+                    "parties": [party.display_name for party in self.roles(db, record.id).values()],
+                }
+                for record in records
+            ]
 
     def require_state(self, record: SessionRecord, *states: State) -> None:
         if State(record.state) not in states:
@@ -973,7 +1009,7 @@ class BrokerService:
             decision_id = contracts.human_decision_id(contract, qid)
             decision = {
                 "id": decision_id,
-                "text": f"{question.text} Odpowiedź: {answer}",
+                "text": f"{question.text} Answer: {answer}",
                 "owner": asking.role,
                 "origin_question": qid,
             }

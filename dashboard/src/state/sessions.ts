@@ -74,7 +74,7 @@ export function importFromParams(id: string, params: URLSearchParams): boolean {
   const tokens: Record<string, string> = {};
   for (const [key, value] of params) {
     if (key === "observer") tokens.observer = value;
-    else if (key !== "present" && value) tokens[`human_${key}`] = value;
+    else if (key !== "present" && key !== "replay" && value) tokens[`human_${key}`] = value;
   }
   if (Object.keys(tokens).length === 0) return false;
   const existing = read().find((session) => session.id === id);

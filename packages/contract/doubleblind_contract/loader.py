@@ -180,7 +180,11 @@ def interpolate_env(data: Mapping[str, Any], env: Mapping[str, str]) -> dict[str
             name = found.group(1)
             if name in env:
                 return env[name]
-            problems.append(Problem(format_path(path), f"environment variable {name} is not set"))
+            available = sorted(key for key in env if key.startswith(("CONSUMER_", "PROVIDER_")))
+            hint = f"; set here: {', '.join(available)}" if available else ""
+            problems.append(
+                Problem(format_path(path), f"environment variable {name} is not set{hint}")
+            )
             return found.group(0)
 
         return ENV_PLACEHOLDER.sub(replace, text)

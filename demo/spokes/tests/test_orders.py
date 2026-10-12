@@ -10,23 +10,23 @@ CITY_BIKE = {
     "sku": "CITY-U3",
     "name": "Spokes Urban 3 city bike",
     "quantity": 1,
-    "unit_price_gr": 289900,
+    "unit_price_pence": 289900,
     "unit_weight_kg": 14.5,
 }
 LIGHT_SET = {
     "sku": "LIGHTS-SET",
     "name": "Front and rear light set",
     "quantity": 2,
-    "unit_price_gr": 12900,
+    "unit_price_pence": 12900,
     "unit_weight_kg": 0.3,
 }
 
 
 def order_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "customer_name": "Jan Kowalski",
-        "phone": "600 100 200",
-        "address_line": "ul. Długa 5/3, 00-001 Warszawa",
+        "customer_name": "John Smith",
+        "phone": "07700 900200",
+        "address_line": "Flat 3, 5 Long Street, London E1 6AN",
         "items": [CITY_BIKE],
     }
     payload.update(overrides)
@@ -61,19 +61,19 @@ def test_create_order_numbers_orders_and_sums_items(client: TestClient) -> None:
     assert first["paid_at"] is None
     assert second["id"] == "ORD-1002"
     assert second["weight_kg"] == 15.1
-    assert second["total_gr"] == 315700
+    assert second["total_pence"] == 315700
     assert [item["sku"] for item in second["items"]] == ["CITY-U3", "LIGHTS-SET"]
 
 
 def test_create_order_keeps_customer_input_as_typed(client: TestClient) -> None:
     order = create_order(
         client,
-        phone=" 0048 600-100-200 ",
-        address_line="al. Jana Pawła II 12 m. 4, 00-950 Warszawa",
+        phone=" 0044 7700-900200 ",
+        address_line="12 St John's Wood Road, Apt 4, London NW8 8RX",
     )
 
-    assert order["phone"] == "0048 600-100-200"
-    assert order["address_line"] == "al. Jana Pawła II 12 m. 4, 00-950 Warszawa"
+    assert order["phone"] == "0044 7700-900200"
+    assert order["address_line"] == "12 St John's Wood Road, Apt 4, London NW8 8RX"
 
 
 def test_create_order_validates_payload(client: TestClient) -> None:
@@ -89,7 +89,7 @@ def test_read_order(client: TestClient) -> None:
     response = client.get(f"/orders/{created['id']}")
 
     assert response.status_code == 200
-    assert response.json()["customer_name"] == "Jan Kowalski"
+    assert response.json()["customer_name"] == "John Smith"
 
 
 def test_read_unknown_order_returns_404(client: TestClient) -> None:

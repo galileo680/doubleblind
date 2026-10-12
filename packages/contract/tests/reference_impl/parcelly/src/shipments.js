@@ -3,22 +3,22 @@ import { ApiError } from "./errors.js";
 import { validatePalletRequest, validateShipmentRequest } from "./validation.js";
 import { STATUS_CHANGED_EVENT } from "./webhooks.js";
 
-const PARCEL_PRICES_GR = Object.freeze({ A: 1299, B: 1599, C: 1999 });
-const PALLET_PRICE_GR = 8900;
+const PARCEL_PRICES_PENCE = Object.freeze({ A: 1299, B: 1599, C: 1999 });
+const PALLET_PRICE_PENCE = 8900;
 
 const SERVICES = Object.freeze({
   parcel: {
     idPrefix: "shp",
     trackingPrefix: "PCL",
     validate: validateShipmentRequest,
-    price: (body) => PARCEL_PRICES_GR[body.parcel.size],
+    price: (body) => PARCEL_PRICES_PENCE[body.parcel.size],
     load: (body) => ({ parcel: { ...body.parcel } }),
   },
   pallet: {
     idPrefix: "plt",
     trackingPrefix: "PAL",
     validate: validatePalletRequest,
-    price: () => PALLET_PRICE_GR,
+    price: () => PALLET_PRICE_PENCE,
     load: (body) => ({ pallet: { ...body.pallet } }),
   },
 });
@@ -30,7 +30,7 @@ export function serializeShipment(shipment) {
     reference: shipment.reference,
     status: shipment.status,
     tracking_number: shipment.trackingNumber,
-    price_gr: shipment.priceGr,
+    price_pence: shipment.pricePence,
     receiver: structuredClone(shipment.receiver),
     ...structuredClone(shipment.load),
     created_at: shipment.createdAt,
@@ -72,8 +72,8 @@ export function createShipmentService({ partners, webhooks }) {
         partnerId: partner.id,
         reference: body.reference,
         status: "CREATED",
-        trackingNumber: `${service.trackingPrefix}${number}PL`,
-        priceGr: service.price(body),
+        trackingNumber: `${service.trackingPrefix}${number}GB`,
+        pricePence: service.price(body),
         receiver: structuredClone(body.receiver),
         load: service.load(body),
         createdAt: now,
@@ -84,7 +84,7 @@ export function createShipmentService({ partners, webhooks }) {
         shipmentId: shipment.id,
         partnerId: partner.id,
         reference: shipment.reference,
-        amountGr: shipment.priceGr,
+        amountPence: shipment.pricePence,
         chargedAt: now,
       });
       if (scopedKey !== null) {
@@ -135,7 +135,7 @@ export function createShipmentService({ partners, webhooks }) {
       return {
         reference,
         count: matching.length,
-        total_gr: matching.reduce((total, charge) => total + charge.amountGr, 0),
+        total_pence: matching.reduce((total, charge) => total + charge.amountPence, 0),
       };
     },
 

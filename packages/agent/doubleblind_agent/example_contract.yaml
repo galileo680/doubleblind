@@ -86,7 +86,7 @@ semantic_mappings:
 decisions:
   - { id: D1, text: "The consumer sends the page count as an integer between 24 and 800; shorter books are padded.", owner: consumer }
   - { id: D2, text: "The order id is both the job reference and the Idempotency-Key.", owner: consumer }
-  - { id: D3, text: "The provider rejects page counts outside 24-800 with 422 PAGES_OUT_OF_RANGE.", owner: provider }
+  - { id: D3, text: "The provider rejects page counts below 24 or above 800 with 422 PAGES_OUT_OF_RANGE.", owner: provider }
 scenarios:
   - id: S1
     title: "Paying an order of a 120-page book queues one print job"

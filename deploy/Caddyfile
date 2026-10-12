@@ -1,0 +1,6 @@
+{$DOUBLEBLIND_DOMAIN} {
+	encode gzip
+	reverse_proxy broker:8000 {
+		flush_interval -1
+	}
+}

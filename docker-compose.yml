@@ -11,10 +11,26 @@ services:
     environment:
       DOUBLEBLIND_BROKER_DB: sqlite:////app/volumes/broker.db
       DOUBLEBLIND_SANDBOX: ${DOUBLEBLIND_SANDBOX:-tokenfactory}
+      DOUBLEBLIND_AUTOPILOT: ${DOUBLEBLIND_AUTOPILOT:-0}
+      BROKER_PUBLIC_URL: ${BROKER_PUBLIC_URL:-}
     ports:
       - "8000:8000"
     volumes:
       - ./volumes:/app/volumes
+
+  caddy:
+    image: caddy:2.8.4
+    profiles: [public]
+    environment:
+      DOUBLEBLIND_DOMAIN: ${DOUBLEBLIND_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - broker
 
   party-spokes:
     build:
@@ -27,6 +43,11 @@ services:
     environment:
       PARTY: spokes
       BROKER_URL: http://broker:8000
+      SESSION_ID: ${SESSION_ID:-}
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+    volumes:
+      - ./volumes:/app/volumes
+      - ./volumes/state/spokes:/state/.doubleblind
     depends_on:
       - broker
 
@@ -41,5 +62,13 @@ services:
     environment:
       PARTY: parcelly
       BROKER_URL: http://broker:8000
+      SESSION_ID: ${SESSION_ID:-}
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+    volumes:
+      - ./volumes:/app/volumes
+      - ./volumes/state/parcelly:/state/.doubleblind
     depends_on:
       - broker
+
+volumes:
+  caddy-data:

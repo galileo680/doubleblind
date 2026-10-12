@@ -38,7 +38,7 @@ def create_order(payload: HookOrderIn, session: SessionDep) -> dict[str, str]:
         phone=payload.phone,
         address_line=payload.address_line,
         weight_kg=payload.weight_kg,
-        total_gr=0,
+        total_pence=0,
         status=payload.status,
         shipment_id=payload.shipment_id,
         paid_at=None if payload.status == OrderStatus.PENDING.value else utcnow(),

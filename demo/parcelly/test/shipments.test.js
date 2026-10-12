@@ -24,8 +24,8 @@ describe("shipments API", () => {
       service: "parcel",
       reference: "ORD-1001",
       status: "CREATED",
-      tracking_number: "PCL1PL",
-      price_gr: 1599,
+      tracking_number: "PCL1GB",
+      price_pence: 1599,
       parcel: { weight_g: 14500, size: "B" },
     });
   });
@@ -33,8 +33,12 @@ describe("shipments API", () => {
   it("prices parcels by size", async () => {
     const small = validShipment({ reference: "ORD-A", parcel: { weight_g: 800, size: "A" } });
     const large = validShipment({ reference: "ORD-C", parcel: { weight_g: 20000, size: "C" } });
-    expect((await client.post("/v1/shipments").send(small).expect(201)).body.price_gr).toBe(1299);
-    expect((await client.post("/v1/shipments").send(large).expect(201)).body.price_gr).toBe(1999);
+    expect((await client.post("/v1/shipments").send(small).expect(201)).body.price_pence).toBe(
+      1299,
+    );
+    expect((await client.post("/v1/shipments").send(large).expect(201)).body.price_pence).toBe(
+      1999,
+    );
   });
 
   it("creates a pallet shipment with its own numbering", async () => {
@@ -43,8 +47,8 @@ describe("shipments API", () => {
     expect(response.body).toMatchObject({
       id: "plt_1",
       service: "pallet",
-      tracking_number: "PAL1PL",
-      price_gr: 8900,
+      tracking_number: "PAL1GB",
+      price_pence: 8900,
       pallet: { weight_g: 27000, pallet_type: "EUR" },
     });
   });

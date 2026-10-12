@@ -53,6 +53,47 @@ function AgentsConnect() {
   );
 }
 
+export function ReplayBar() {
+  const { replay } = useSessionContext();
+  return (
+    <div className="row" data-testid="replay-bar">
+      {replay.active ? (
+        <>
+          <button type="button" className="btn btn-sm" onClick={replay.toggle}>
+            {replay.playing ? "Pause" : replay.position >= replay.total ? "Replay again" : "Play"}
+          </button>
+          <Segmented
+            small
+            value={replay.speed}
+            onChange={replay.setSpeed}
+            options={[
+              { value: "slow", label: "0.5×" },
+              { value: "normal", label: "1×" },
+              { value: "fast", label: "4×" },
+            ]}
+          />
+          <span className="mono muted">
+            {replay.position}/{replay.total}
+          </span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={replay.stop}>
+            Back to live
+          </button>
+        </>
+      ) : (
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={replay.start}
+          disabled={replay.total === 0}
+          title="Play the recorded event log from the start"
+        >
+          ▶ Replay session
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SessionHeader() {
   const { id, stored, view, setView, viewOptions, data, now } = useSessionContext();
   const session = data.session;
@@ -156,6 +197,7 @@ export function SessionHeader() {
           </div>
         </div>
         <span className="grow" />
+        <ReplayBar />
         <div className="row">
           <span className="muted">View as</span>
           <Segmented

@@ -3,6 +3,7 @@ import type {
   Certificate,
   CreatedSession,
   ProbeReport,
+  PublicSession,
   Question,
   SessionView,
 } from "./types";
@@ -41,6 +42,7 @@ async function request<T>(path: string, token: string | null, init: RequestInit 
 const session = (id: string) => `/sessions/${encodeURIComponent(id)}`;
 
 export const api = {
+  publicSessions: () => request<PublicSession[]>("/public/sessions", null),
   createSession: (name: string, preset: string, adminToken: string | null) =>
     request<CreatedSession>("/sessions", adminToken, {
       method: "POST",

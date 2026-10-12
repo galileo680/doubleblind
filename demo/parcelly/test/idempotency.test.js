@@ -32,14 +32,22 @@ describe("idempotency", () => {
       .expect(201);
     expect(second.body.id).toBe(first.body.id);
     expect(second.headers["idempotent-replayed"]).toBe("true");
-    expect(await charges("ORD-1001")).toEqual({ reference: "ORD-1001", count: 1, total_gr: 1599 });
+    expect(await charges("ORD-1001")).toEqual({
+      reference: "ORD-1001",
+      count: 1,
+      total_pence: 1599,
+    });
   });
 
   it("creates a new shipment and a new charge for every request without a key", async () => {
     const first = await client.post("/v1/shipments").send(validShipment()).expect(201);
     const second = await client.post("/v1/shipments").send(validShipment()).expect(201);
     expect(second.body.id).not.toBe(first.body.id);
-    expect(await charges("ORD-1001")).toEqual({ reference: "ORD-1001", count: 2, total_gr: 3198 });
+    expect(await charges("ORD-1001")).toEqual({
+      reference: "ORD-1001",
+      count: 2,
+      total_pence: 3198,
+    });
   });
 
   it("treats a blank key like a missing key", async () => {

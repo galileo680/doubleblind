@@ -80,24 +80,24 @@ describe("shipping rules", () => {
     );
   });
 
-  it("requires the phone in +48XXXXXXXXX format", async () => {
-    for (const phone of ["600100200", "+48 600 100 200", "0048600100200", "+4960010020"]) {
+  it("requires the phone in +447XXXXXXXXX format", async () => {
+    for (const phone of ["07700900200", "+44 7700 900200", "00447700900200", "+44770090020"]) {
       const shipment = validShipment();
       shipment.receiver.phone = phone;
       await rejectedWith("/v1/shipments", shipment, 422, "INVALID_PHONE");
     }
   });
 
-  it("requires the postcode in NN-NNN format", async () => {
+  it("requires the postcode in UK format", async () => {
     await rejectedWith(
       "/v1/shipments",
-      withAddress({ postcode: "00001" }),
+      withAddress({ postcode: "e16an" }),
       422,
       "INVALID_POSTCODE",
     );
     await rejectedWith(
       "/v1/pallets",
-      { ...validPallet(), receiver: withAddress({ postcode: "0-001" }).receiver },
+      { ...validPallet(), receiver: withAddress({ postcode: "E16AN" }).receiver },
       422,
       "INVALID_POSTCODE",
     );
@@ -106,39 +106,39 @@ describe("shipping rules", () => {
   it("checks that the postcode belongs to the city", async () => {
     await rejectedWith(
       "/v1/shipments",
-      withAddress({ postcode: "31-019", city: "Warszawa" }),
+      withAddress({ postcode: "M1 1AE", city: "London" }),
       422,
       "POSTCODE_CITY_MISMATCH",
     );
     await rejectedWith(
       "/v1/shipments",
-      withAddress({ postcode: "99-999", city: "Warszawa" }),
+      withAddress({ postcode: "PO1 2AB", city: "London" }),
       422,
       "POSTCODE_CITY_MISMATCH",
     );
     await client
       .post("/v1/shipments")
-      .send(withAddress({ postcode: "31-019", city: "Kraków" }))
+      .send(withAddress({ postcode: "M1 1AE", city: "Manchester" }))
       .expect(201);
     await client
       .post("/v1/shipments")
-      .send(withAddress({ postcode: "00-950", city: " warszawa " }))
+      .send(withAddress({ postcode: "NW8 8RX", city: " london " }))
       .expect(201);
     await client
       .post("/v1/shipments")
-      .send(withAddress({ postcode: "99-300", city: "Kutno" }))
+      .send(withAddress({ postcode: "PO1 2AB", city: "Portsmouth" }))
       .expect(201);
   });
 
   it("applies the postcode check to pallets", async () => {
     const pallet = {
       ...validPallet(),
-      receiver: withAddress({ postcode: "50-101", city: "Gdańsk" }).receiver,
+      receiver: withAddress({ postcode: "BS1 4DJ", city: "Cardiff" }).receiver,
     };
     await rejectedWith("/v1/pallets", pallet, 422, "POSTCODE_CITY_MISMATCH");
   });
 
-  it("only ships within Poland", async () => {
+  it("only ships within the United Kingdom", async () => {
     const response = await client
       .post("/v1/shipments")
       .send(withAddress({ country: "DE" }))

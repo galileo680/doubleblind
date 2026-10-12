@@ -110,12 +110,16 @@ def evaluate(outcome: dict[str, Any], replay: bool, paid_calls: int) -> bool:
     return all(results)
 
 
-def run_once(sandbox: SandboxKind, until_hold: bool) -> dict[str, Any]:
+def run_once(
+    sandbox: SandboxKind, until_hold: bool, broker: str | None, publish: bool
+) -> dict[str, Any]:
     reset()
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         local_root = Path(directory) / "sandbox"
         try:
-            return run_agents(sandbox, local_root, "certified", True, SESSION_NAME, until_hold)
+            return run_agents(
+                sandbox, local_root, "certified", True, SESSION_NAME, until_hold, broker, publish
+            )
         finally:
             LocalSandboxProvider(local_root).remove_all()
 
@@ -127,6 +131,8 @@ def main() -> None:
     parser.add_argument("--repeat", type=int, default=1, help="replay N times and compare traces")
     parser.add_argument("--pace", type=int, default=0, help="delay per replayed model answer, ms")
     parser.add_argument("--hold", action="store_true", help="keep the dashboard running afterwards")
+    parser.add_argument("--broker", help="use a running broker (e.g. the public one) by its URL")
+    parser.add_argument("--publish", action="store_true", help="make the session publicly viewable")
     arguments = parser.parse_args()
     if arguments.command == "reset":
         reset()
@@ -139,7 +145,11 @@ def main() -> None:
         raise SystemExit(f"no recording at {CASSETTE}; run 'record' first")
     port = int(os.environ.get("BROKER_PORT", "0")) or free_port()
     os.environ["BROKER_PORT"] = str(port)
-    tunnel = public_url(port) if arguments.sandbox == "tokenfactory" else nullcontext()
+    tunnel = (
+        public_url(port)
+        if arguments.sandbox == "tokenfactory" and not arguments.broker
+        else nullcontext()
+    )
     traces: list[str] = []
     ok = True
     with tunnel:
@@ -149,11 +159,19 @@ def main() -> None:
                 flush=True,
             )
             before = model_calls()
-            outcome = run_once(arguments.sandbox, arguments.hold and run == arguments.repeat)
+            outcome = run_once(
+                arguments.sandbox,
+                arguments.hold and run == arguments.repeat,
+                arguments.broker,
+                arguments.publish,
+            )
             ok = evaluate(outcome, replay, model_calls() - before) and ok
             digest = json.dumps(trace(outcome), sort_keys=True, indent=1)
             TRACE_DIR.mkdir(parents=True, exist_ok=True)
             (TRACE_DIR / f"{arguments.sandbox}-{run}.json").write_text(digest, encoding="utf-8")
+            (TRACE_DIR / f"{arguments.sandbox}-{run}-events.json").write_text(
+                json.dumps(outcome["events"], ensure_ascii=False, indent=1), encoding="utf-8"
+            )
             traces.append(hashlib.sha256(digest.encode("utf-8")).hexdigest())
             print(f"trace {traces[-1][:16]} · contract {trace(outcome)['contract'][:16]}")
     if arguments.repeat > 1:

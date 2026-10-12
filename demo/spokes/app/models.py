@@ -28,7 +28,7 @@ class Order(Base):
     phone: Mapped[str] = mapped_column(String(40))
     address_line: Mapped[str] = mapped_column(String(300))
     weight_kg: Mapped[float]
-    total_gr: Mapped[int] = mapped_column(default=0)
+    total_pence: Mapped[int] = mapped_column(default=0)
     status: Mapped[str] = mapped_column(String(20), default=OrderStatus.PENDING.value)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     paid_at: Mapped[datetime | None] = mapped_column(default=None)
@@ -48,6 +48,6 @@ class OrderItem(Base):
     sku: Mapped[str] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200))
     quantity: Mapped[int]
-    unit_price_gr: Mapped[int]
+    unit_price_pence: Mapped[int]
     unit_weight_kg: Mapped[float]
     order: Mapped[Order] = relationship(back_populates="items")

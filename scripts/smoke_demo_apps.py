@@ -127,15 +127,15 @@ def shipment(
     return {
         "reference": reference,
         "receiver": {
-            "name": "Jan Kowalski",
-            "phone": "+48600100200",
+            "name": "John Smith",
+            "phone": "+447700900200",
             "address": {
-                "street": "Długa",
+                "street": "Long Street",
                 "building": "5",
                 "flat": "3",
-                "postcode": "00-001",
-                "city": "Warszawa",
-                "country": "PL",
+                "postcode": "E1 6AN",
+                "city": "London",
+                "country": "GB",
                 **address,
             },
         },
@@ -178,7 +178,7 @@ def check_parcelly(base_url: str, receiver: WebhookReceiver, report: Report) -> 
         mismatch = client.post(
             "/v1/shipments",
             headers=auth,
-            json=shipment("SMOKE-CITY", postcode="31-019", city="Warszawa"),
+            json=shipment("SMOKE-CITY", postcode="M1 1AE", city="London"),
         )
         report.check(
             "Parcelly: wrong postcode for city -> 422 POSTCODE_CITY_MISMATCH",
@@ -219,15 +219,15 @@ def check_spokes(base_url: str, report: Report) -> None:
         created = client.post(
             "/orders",
             json={
-                "customer_name": "Jan Kowalski",
-                "phone": "600 100 200",
-                "address_line": "ul. Długa 5/3, 00-001 Warszawa",
+                "customer_name": "John Smith",
+                "phone": "07700 900200",
+                "address_line": "Flat 3, 5 Long Street, London E1 6AN",
                 "items": [
                     {
                         "sku": "CITY-U3",
                         "name": "Spokes Urban 3 city bike",
                         "quantity": 1,
-                        "unit_price_gr": 289900,
+                        "unit_price_pence": 289900,
                         "unit_weight_kg": 14.5,
                     }
                 ],

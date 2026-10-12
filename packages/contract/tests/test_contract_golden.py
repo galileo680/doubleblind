@@ -13,6 +13,7 @@ CONSUMER_SCENARIOS = [f"S{number}" for number in range(1, 10)]
 PROVIDER_SCENARIOS = ["P1", "P2", "P3", "P4"]
 MAPPING = "spokes/app/integrations/parcelly/mapping.py"
 WEBHOOK = "spokes/app/integrations/parcelly/webhook.py"
+CLIENT = "spokes/app/integrations/parcelly/client.py"
 
 MUTATIONS = {
     "kg_to_g_drops_the_fraction": (
@@ -35,9 +36,15 @@ MUTATIONS = {
     ),
     "national_phone_without_country_code": (
         MAPPING,
-        'return f"+48{digits}"',
-        'return f"+{digits}"',
+        'return f"+44{digits[1:]}"',
+        'return f"+{digits[1:]}"',
         {"S1", "S3", "S5"},
+    ),
+    "base_url_path_dropped": (
+        CLIENT,
+        "f\"{os.environ['PARCELLY_BASE_URL'].rstrip('/')}{path}\"",
+        "__import__(\"urllib.parse\").parse.urljoin(os.environ['PARCELLY_BASE_URL'], path)",
+        {"S1", "S2", "S3", "S4", "S5"},
     ),
 }
 

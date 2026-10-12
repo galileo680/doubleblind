@@ -20,15 +20,15 @@ export function validShipment(overrides = {}) {
   return {
     reference: "ORD-1001",
     receiver: {
-      name: "Jan Kowalski",
-      phone: "+48600100200",
+      name: "John Smith",
+      phone: "+447700900200",
       address: {
-        street: "Długa",
+        street: "Long Street",
         building: "5",
         flat: "3",
-        postcode: "00-001",
-        city: "Warszawa",
-        country: "PL",
+        postcode: "E1 6AN",
+        city: "London",
+        country: "GB",
       },
     },
     parcel: { weight_g: 14500, size: "B" },

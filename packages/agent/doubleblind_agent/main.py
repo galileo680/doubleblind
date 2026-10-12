@@ -19,7 +19,7 @@ from doubleblind_agent.triage import triage_e2e
 from doubleblind_contract.guard_rules import SyntheticAllowlist
 from doubleblind_llm import LLMClient
 from doubleblind_llm.domain import LLMCallEvent
-from doubleblind_sandbox.environment import remote_sandbox
+from doubleblind_sandbox.environment import recorded_bases, remote_sandbox
 from doubleblind_sandbox.provider import ServiceSandbox, Workspace
 
 SandboxFactory = Callable[[], ServiceSandbox]
@@ -38,12 +38,18 @@ class PartyConfig:
 
     @classmethod
     def from_env(cls) -> "PartyConfig":
+        party = os.environ["PARTY"]
+        tag = os.environ.get("SANDBOX_BASE_TAG")
+        recorded = recorded_bases(os.environ.get("DOUBLEBLIND_SANDBOX", "tokenfactory")) or {}
+        base = f"tag:{tag}" if tag else recorded.get(party)
+        if base is None:
+            raise SystemExit("set SANDBOX_BASE_TAG or build the base images first")
         return cls(
             os.environ["BROKER_URL"],
             os.environ["AGENT_TOKEN"],
             os.environ["SESSION_ID"],
-            os.environ["PARTY"],
-            f"tag:{os.environ['SANDBOX_BASE_TAG']}",
+            party,
+            base,
             Path(os.environ.get("DOUBLEBLIND_STATE_DIR", "/state/.doubleblind")),
         )
 

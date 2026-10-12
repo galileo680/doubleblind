@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api/client";
-import type { SessionState, SessionView } from "../api/types";
-import { Badge, Card, Empty, Kpi, StateBadge, Swatch } from "../components/ui";
+import type { PublicSession, SessionState, SessionView } from "../api/types";
+import { Badge, Card, CardHead, Empty, Kpi, StateBadge, Swatch } from "../components/ui";
 import { plural, usd } from "../lib/format";
 import { roleTone } from "../lib/model";
 import { navigate, sessionPath } from "../state/route";
@@ -30,6 +30,7 @@ const GROUP_STATES: Record<Exclude<Group, "all">, SessionState[]> = {
   failed: ["FAILED"],
 };
 
+const PUBLIC_COLUMNS = "minmax(220px,1fr) 170px 230px";
 const COLUMNS = "minmax(220px,2fr) minmax(180px,1.4fr) 170px 90px 80px 90px 110px 70px";
 
 function tokenOf(session: StoredSession): string | null {
@@ -149,6 +150,55 @@ function NewSession() {
   );
 }
 
+function PublicSessions() {
+  const [sessions, setSessions] = useState<PublicSession[]>([]);
+  useEffect(() => {
+    api
+      .publicSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]));
+  }, []);
+  if (sessions.length === 0) return null;
+  const open = (session: PublicSession, replay: boolean) => {
+    saveSession(fromTokens(session.session_id, session.name, { observer: session.token }));
+    navigate(`${sessionPath(session.session_id)}${replay ? "?replay=1" : ""}`);
+  };
+  return (
+    <Card testId="public-sessions">
+      <CardHead title="Public sessions" note="Recorded runs anyone can watch — no tokens needed" />
+      {sessions.map((session) => (
+        <div
+          key={session.session_id}
+          className="trow"
+          style={{ gridTemplateColumns: PUBLIC_COLUMNS }}
+        >
+          <div className="ellipsis">
+            <div style={{ fontWeight: 500 }} className="ellipsis">
+              {session.name}
+            </div>
+            <div className="muted mono">{session.parties.join(" ↔ ")}</div>
+          </div>
+          <span>
+            <StateBadge state={session.state} />
+          </span>
+          <span className="row" style={{ justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => open(session, true)}
+            >
+              ▶ Watch replay
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => open(session, false)}>
+              Open
+            </button>
+          </span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 function OpenLink() {
   const [link, setLink] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -219,6 +269,7 @@ export function HomePage() {
           </div>
         </div>
       </div>
+      <PublicSessions />
       <div className="kpi-cards">
         <Kpi label="In progress" value={count("active")} sub="sessions" />
         <Kpi

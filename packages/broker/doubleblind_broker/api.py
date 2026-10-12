@@ -77,6 +77,14 @@ def build_router(service: BrokerService) -> APIRouter:
     ) -> dict[str, Any]:
         return service.create_session(caller, body.name, body.preset)
 
+    @router.get("/public/sessions")
+    async def public_sessions() -> list[dict[str, Any]]:
+        return service.public_sessions()
+
+    @router.post("/sessions/{session_id}/publish")
+    async def publish(session_id: str, caller: Caller) -> dict[str, Any]:
+        return service.publish(caller, session_id)
+
     @router.post("/sessions/{session_id}/start")
     async def start(session_id: str, caller: Caller) -> dict[str, Any]:
         return service.start(caller, session_id)

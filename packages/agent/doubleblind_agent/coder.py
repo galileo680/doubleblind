@@ -10,7 +10,7 @@ from doubleblind_agent.tools import TOOLS, Finished, Outcome, Toolbox
 from doubleblind_contract.loader import parse_yaml
 from doubleblind_llm import LLMClient, LLMRequest, Role
 
-MAX_STEPS = 60
+MAX_STEPS = 80
 RECENT_RESULTS = 10
 TRIMMED_RESULT = 300
 REPEAT_LIMIT = 3

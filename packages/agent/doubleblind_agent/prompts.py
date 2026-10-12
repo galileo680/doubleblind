@@ -126,7 +126,8 @@ BINDING_GUIDE = """How contract tests run (db-contract test <side> contract.yaml
   Ports and URLs come from the environment: consumer side CONSUMER_PORT and CONSUMER_BASE_URL, provider side PROVIDER_PORT
   and PROVIDER_BASE_URL; use ${VAR} in the binding. Values in app.env may use templates: {{stub.url}} (the stub of the
   provider, consumer side only), {{capture.url}} (the server that receives your webhooks, provider side only),
-  {{secrets.<name>}} (secret values of the contract).
+  {{secrets.<name>}} (secret values of the contract). The provider URL always has a path (the stub and the E2E gateway):
+  append operation paths to it, never resolve them against its root.
 - Steps do/expect_state call binding.actions/queries: {method, path, headers?, query?, body?, capture?}; body "{{args}}" sends
   the step args, capture {name: "$.json.path"} stores response values in ctx for later steps ({{ctx.name}}, {{args.x}}).
 - Consumer side: the stub plays the provider (answers with operations.*.stub and validates every request you send), and
