@@ -50,6 +50,12 @@ Rules:
    never block signing.
 Respond ONLY with JSON matching the Turn schema. Write "message" in clear English for the other agent and both humans."""
 
+TAVILY_RULE = """11. Verify public standards (phone numbering plans, postcode formats, HMAC signatures, HTTP status semantics) instead of
+   relying on memory: put up to 3 web search queries in lookup_standards, once per standard and early in the negotiation;
+   the answers and source URLs arrive with your next turn. When a decision relies on a looked-up standard, add
+   {decision_id, source_url} to citations with a URL from the results; the source is appended to the decision text.
+   Queries are public: never put private details of your company in them."""
+
 CONTRACT_GUIDE = """DoubleBlind Contract Spec v1 in short (the contract is YAML, patched as JSON).
 
 Top level: doubleblind "1.0", id, version, status, parties, environments (managed by the broker; never patch /doubleblind,

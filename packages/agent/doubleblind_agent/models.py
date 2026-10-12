@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 BROKER_FIELDS = frozenset({"doubleblind", "id", "version", "status", "parties"})
 
@@ -111,6 +111,11 @@ class HumanQuestion(Model):
     default: str
 
 
+class Citation(Model):
+    decision_id: str
+    source_url: str
+
+
 class Turn(Model):
     message: str
     patches: list[Patch]
@@ -123,6 +128,11 @@ class Turn(Model):
             for patch in self.patches
             if patch.path.partition("/")[2].split("/")[0] not in BROKER_FIELDS
         ]
+
+
+class TavilyTurn(Turn):
+    lookup_standards: list[str] = Field(default_factory=list, max_length=3)
+    citations: list[Citation] = Field(default_factory=list)
 
 
 class TriageResult(Model):

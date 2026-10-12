@@ -7,8 +7,9 @@ import jsonpatch
 from pydantic import ValidationError
 
 from doubleblind_agent.broker_client import BrokerClient
-from doubleblind_agent.models import Psm, Turn
-from doubleblind_agent.prompts import CONTRACT_GUIDE, NEGOTIATOR
+from doubleblind_agent.models import Patch, Psm, TavilyTurn, Turn
+from doubleblind_agent.prompts import CONTRACT_GUIDE, NEGOTIATOR, TAVILY_RULE
+from doubleblind_agent.standards import enabled
 from doubleblind_contract.loader import parse_yaml
 from doubleblind_contract.validate import signing_problems, validate_contract_data
 from doubleblind_llm import LLMClient, LLMRequest, Role
@@ -29,6 +30,8 @@ def applicable_patches(
 ) -> list[dict[str, Any]]:
     document, kept = contract, []
     for patch in patches:
+        if not patch["path"].strip("/"):
+            continue
         variants = [patch, {**patch, "op": "add"}] if patch["op"] == "replace" else [patch]
         for variant in variants:
             try:
@@ -38,6 +41,29 @@ def applicable_patches(
             kept.append(variant)
             break
     return kept
+
+
+def cited(
+    contract: dict[str, Any], turn: TavilyTurn, standards: list[dict[str, Any]]
+) -> TavilyTurn:
+    known = {url for item in standards for url in item["sources"]}
+    document = jsonpatch.apply_patch(contract, applicable_patches(contract, turn.patch_list()))
+    decisions = [item if isinstance(item, dict) else {} for item in document.get("decisions") or []]
+    extra = []
+    for citation in turn.citations:
+        index = next(
+            (i for i, item in enumerate(decisions) if item.get("id") == citation.decision_id), None
+        )
+        if index is None or citation.source_url not in known:
+            continue
+        text = str(decisions[index].get("text", ""))
+        if citation.source_url in text:
+            continue
+        decisions[index] = {**decisions[index], "text": f"{text} Source: {citation.source_url}"}
+        extra.append(
+            Patch(op="replace", path=f"/decisions/{index}/text", value=decisions[index]["text"])
+        )
+    return turn.model_copy(update={"patches": [*turn.patches, *extra]})
 
 
 def patch_errors(contract: dict[str, Any], turn: Turn) -> list[str]:
@@ -74,6 +100,15 @@ def history(turns: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines) or "No turns yet."
 
 
+def standards(context: dict[str, Any]) -> str:
+    return "\n".join(
+        f"- {item['query']}: {item['answer']} (sources: {', '.join(item['sources'])})"
+        if item["sources"]
+        else f"- {item['query']}: no result"
+        for item in context.get("standards", [])
+    )
+
+
 def messages(
     psm: Psm,
     party: str,
@@ -99,6 +134,12 @@ def messages(
         "Phone numbers and e-mail addresses in examples may only be these synthetic values: "
         + ", ".join([*synthetic["phones"], *synthetic["emails"]]),
     ]
+    if enabled():
+        parts.insert(
+            5,
+            "Public standards you looked up with web search:\n"
+            + (standards(context) or "none yet"),
+        )
     if context.get("gap"):
         gap = context["gap"]
         parts.append(
@@ -112,7 +153,11 @@ def messages(
             + "\n".join(f"- {item}" for item in feedback)
         )
     return [
-        {"role": "system", "content": NEGOTIATOR.format(party=party, role=role)},
+        {
+            "role": "system",
+            "content": NEGOTIATOR.format(party=party, role=role)
+            + (f"\n{TAVILY_RULE}" if enabled() else ""),
+        },
         {
             "role": "system",
             "content": f"{CONTRACT_GUIDE}\n\n"
@@ -144,19 +189,21 @@ async def propose_turn(
     vet: Callable[[dict[str, Any]], list[str]],
     feedback: list[str],
 ) -> dict[str, Any]:
+    model = TavilyTurn if enabled() else Turn
+
     async def ask(conversation: list[dict[str, Any]], role_name: Role = Role.NEGOTIATOR) -> Turn:
         request = LLMRequest(
             role=role_name,
             messages=conversation,
-            response_schema=Turn.model_json_schema(),
+            response_schema=model.model_json_schema(),
             party=party,
         )
         for _ in range(STRUCTURED_ATTEMPTS - 1):
             try:
-                return Turn.model_validate((await llm.complete(request)).parsed)
+                return model.model_validate((await llm.complete(request)).parsed)
             except (StructuredOutputError, ValidationError):
                 continue
-        return Turn.model_validate((await llm.complete(request)).parsed)
+        return model.model_validate((await llm.complete(request)).parsed)
 
     def problems_of(candidate: Turn) -> list[str]:
         return patch_errors(context["contract"], candidate) + vet(turn_payload(context, candidate))
@@ -185,4 +232,16 @@ async def propose_turn(
         appended = turn.model_copy(update={"patches": [*turn.patches, *fix.patches]})
         replaced = turn.model_copy(update={"patches": fix.patches})
         turn = min(appended, replaced, key=lambda candidate: len(problems_of(candidate)))
-    return turn_payload(context, turn)
+    if patch_errors(context["contract"], turn):
+        turn = turn.model_copy(
+            update={
+                "patches": [],
+                "status": "continue",
+                "message": f"{turn.message}\n(My contract changes in this turn did not validate "
+                "and were dropped; I will propose them again.)",
+            }
+        )
+    elif isinstance(turn, TavilyTurn):
+        turn = cited(context["contract"], turn, context.get("standards", []))
+    lookups = turn.lookup_standards if isinstance(turn, TavilyTurn) else []
+    return {**turn_payload(context, turn), "lookup_standards": lookups}

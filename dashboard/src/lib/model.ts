@@ -230,6 +230,13 @@ export function timeline(events: BrokerEvent[], session: SessionView | null): Ti
       case "contract.gap":
         push("agent", `${name(data.party)} reported a contract gap`, "w");
         break;
+      case "tool.lookup_standard":
+        push(
+          "agent",
+          `${name(data.party)} agent checked a public standard via Tavily: ${String(data.query)}`,
+          "i",
+        );
+        break;
       case "coder.progress":
         push(
           "agent",

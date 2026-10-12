@@ -14,6 +14,7 @@ from doubleblind_agent.egress_guard import EgressGuard
 from doubleblind_agent.models import Psm
 from doubleblind_agent.negotiator import negotiation_context, propose_turn
 from doubleblind_agent.psm import build_psm, snapshot
+from doubleblind_agent.standards import lookup_standard
 from doubleblind_agent.tools import BINDING_FILE, Toolbox
 from doubleblind_agent.triage import triage_e2e
 from doubleblind_contract.guard_rules import SyntheticAllowlist
@@ -67,6 +68,7 @@ class PartyRuntime:
         self.idle = False
         self.continuations = 0
         self.previous = ""
+        self.standards: list[dict[str, Any]] = []
 
     def save(self, name: str, value: Any) -> None:
         self.config.state_dir.mkdir(parents=True, exist_ok=True)
@@ -156,14 +158,30 @@ class PartyRuntime:
             return guard.check("turns", payload).reasons
 
         async def turn(feedback: list[str]) -> dict[str, Any]:
-            situation = {**await negotiation_context(broker), "gap": context.get("gap")}
+            situation = {
+                **await negotiation_context(broker),
+                "gap": context.get("gap"),
+                "standards": list(self.standards),
+            }
             proposed = await propose_turn(
                 self.llm, psm, party, role, situation, synthetic, vet, feedback
             )
+            await self.look_up(broker, guard, proposed.pop("lookup_standards"))
             self.log.append(f"round {proposed['round']}: {proposed['status']}")
             return proposed
 
         await guard.send("turns", turn, broker.post_turn)
+
+    async def look_up(self, broker: BrokerClient, guard: EgressGuard, queries: list[str]) -> None:
+        known = {item["query"] for item in self.standards}
+        for query in queries:
+            if query in known or guard.check("lookup", {"query": query}).blocked:
+                continue
+            found = await lookup_standard(query)
+            known.add(query)
+            if found is not None:
+                self.standards.append(found)
+                await broker.post_event({"type": "tool.lookup_standard", **found})
 
     async def workspace(self, sandbox: ServiceSandbox) -> Workspace:
         path = self.config.state_dir / "workspace.json"

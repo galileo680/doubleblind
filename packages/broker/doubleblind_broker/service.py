@@ -180,8 +180,17 @@ class SandboxCostIn(BaseModel):
     cost_usd: float = Field(ge=0)
 
 
+class StandardLookupIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tool.lookup_standard"]
+    query: str = Field(max_length=300)
+    answer: str = Field(max_length=1000)
+    sources: list[str] = Field(max_length=3)
+
+
 AgentEventIn = Annotated[
-    PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn | SandboxCostIn,
+    PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn | SandboxCostIn | StandardLookupIn,
     Field(discriminator="type"),
 ]
 
@@ -1381,7 +1390,12 @@ class BrokerService:
         self,
         principal: Principal,
         session_id: str,
-        event: PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn | SandboxCostIn,
+        event: PsmBuiltIn
+        | EgressIn
+        | LlmCallIn
+        | CoderProgressIn
+        | SandboxCostIn
+        | StandardLookupIn,
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
         party_key = principal.party_key or ""
@@ -1389,7 +1403,7 @@ class BrokerService:
         outbox = Outbox()
         with open_session(self.engine) as db:
             record = self.session_record(db, session_id)
-            if isinstance(event, PsmBuiltIn | CoderProgressIn):
+            if isinstance(event, PsmBuiltIn | CoderProgressIn | StandardLookupIn):
                 outbox.add(event.type, party_key, payload)
             elif isinstance(event, EgressIn):
                 counter = "blocked_count" if event.type == "egress.blocked" else "redacted_count"

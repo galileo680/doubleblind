@@ -274,6 +274,18 @@ def evaluate_negotiation(outcome: dict[str, Any]) -> bool:
         ),
         evaluate_contract(parse_yaml(outcome["contract"])),
     ]
+    lookups = [
+        event["payload"] for event in outcome["events"] if event["type"] == "tool.lookup_standard"
+    ]
+    if lookups or os.environ.get("DOUBLEBLIND_TAVILY") == "1":
+        sources = {url for item in lookups for url in item["sources"]}
+        cited = [
+            decision["id"]
+            for decision in parse_yaml(outcome["contract"]).get("decisions", [])
+            if any(url in decision["text"] for url in sources)
+        ]
+        print(f"Tavily lookups: {[item['query'] for item in lookups]}")
+        results.append(check(f"a decision cites a Tavily source: {cited}", bool(cited)))
     return all(results)
 
 
@@ -359,6 +371,7 @@ def main() -> None:
         if arguments.negotiation == "agents"
         else RECORDINGS / "spokes-parcelly-demo.jsonl"
     )
+    os.environ["DOUBLEBLIND_TAVILY_RECORDING"] = str(RECORDINGS / "tavily.jsonl")
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
         local_root = Path(directory) / "sandbox"
         try:
