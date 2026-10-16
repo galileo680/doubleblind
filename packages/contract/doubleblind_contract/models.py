@@ -274,6 +274,11 @@ class Scenario(ContractModel):
     steps: Annotated[list[Step], Field(min_length=1)]
 
 
+class Setup(ContractModel):
+    provider: list[DoStep] = Field(default_factory=list)
+    consumer: list[DoStep] = Field(default_factory=list)
+
+
 class Contract(ContractModel):
     doubleblind: Literal["1.0"]
     id: Slug
@@ -288,6 +293,7 @@ class Contract(ContractModel):
     webhooks: dict[SnakeId, Webhook] = Field(default_factory=dict)
     semantic_mappings: dict[SnakeId, dict[str, str]] = Field(default_factory=dict)
     decisions: list[Decision] = Field(default_factory=list)
+    setup: Setup = Field(default_factory=Setup)
     scenarios: Annotated[list[Scenario], Field(min_length=1)]
 
     def scenarios_for(self, side: Side) -> list[Scenario]:

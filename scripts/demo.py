@@ -23,7 +23,7 @@ TRACE_DIR = REPO_ROOT / "volumes" / "demo-traces"
 SESSION_NAME = "Spokes ↔ Parcelly shipping"
 
 
-CASSETTE = REPO_ROOT / "demo" / "recordings" / "spokes-parcelly-demo.jsonl"
+CASSETTE = REPO_ROOT / "demo" / "recordings" / "spokes-parcelly.jsonl"
 
 
 def model_calls() -> int:
@@ -118,7 +118,7 @@ def run_once(
         local_root = Path(directory) / "sandbox"
         try:
             return run_agents(
-                sandbox, local_root, "certified", True, SESSION_NAME, until_hold, broker, publish
+                sandbox, local_root, "certified", False, SESSION_NAME, until_hold, broker, publish
             )
         finally:
             LocalSandboxProvider(local_root).remove_all()

@@ -101,6 +101,8 @@ async def run_parties(
     async with httpx.AsyncClient(
         base_url=url, headers={"Authorization": f"Bearer {tokens['observer']}"}
     ) as viewer:
+        resumes = 0
+        escalated_polls = 0
         while not all(task.done() for task in tasks):
             if any(task.done() and task.exception() for task in tasks):
                 break
@@ -108,12 +110,15 @@ async def run_parties(
                 task.done() or runtime.idle for task, runtime in zip(tasks, runtimes, strict=True)
             ):
                 break
-            events = (await viewer.get(f"/api/v1/sessions/{session_id}/events")).json()
-            if any(
-                event["type"] == "session.state_changed"
-                and event["payload"]["to"] not in ACTIVE_STATES[until]
-                for event in events
-            ):
+            state = (await viewer.get(f"/api/v1/sessions/{session_id}")).json()["state"]
+            escalated_polls = escalated_polls + 1 if state == "ESCALATED" else 0
+            if state == "ESCALATED" and resumes < MAX_RESUMES:
+                if escalated_polls >= ESCALATION_WAIT_POLLS:
+                    response = await viewer.post(
+                        f"/api/v1/sessions/{session_id}/resume", json={"extra_rounds": EXTRA_ROUNDS}
+                    )
+                    resumes += response.is_success
+            elif state not in ACTIVE_STATES[until]:
                 break
             await asyncio.sleep(1.0)
     for task in tasks:
@@ -149,6 +154,13 @@ def negotiate_with_scripts(url: str, session_id: str, tokens: dict[str, str]) ->
         thread.join()
 
 
+SCRIPTED_ROUNDS = 14
+EXTRA_ROUNDS = 6
+ESCALATION_WAIT_POLLS = 3
+MAX_RESUMES = 2
+AGENT_ROUNDS = 14
+
+
 def run_agents(
     kind: SandboxKind,
     local_root: Path,
@@ -163,6 +175,7 @@ def run_agents(
     bases = base_heads(kind, local_root)
     settings = BrokerSettings(
         presets_dir=REPO_ROOT / "demo" / "presets",
+        max_rounds=SCRIPTED_ROUNDS if scripted else AGENT_ROUNDS,
         autopilot=True,
         autopilot_delay_s=0.0,
         next_action_wait_s=2.0,
@@ -333,9 +346,9 @@ def evaluate_implementation(outcome: dict[str, Any]) -> bool:
 
 def evaluate_certification(outcome: dict[str, Any]) -> bool:
     certificate = outcome["certificate"]
-    gateway = [
-        event["payload"] for event in outcome["events"] if event["type"] == "gateway.request"
-    ]
+    events = outcome["events"]
+    last = max((i for i, event in enumerate(events) if event["type"] == "e2e.started"), default=0)
+    gateway = [event["payload"] for event in events[last:] if event["type"] == "gateway.request"]
     for event in outcome["events"]:
         if event["type"] == "e2e.result":
             statuses = [

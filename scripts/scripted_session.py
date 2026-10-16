@@ -71,6 +71,8 @@ def normalized(contract: dict[str, Any]) -> dict[str, Any]:
             if isinstance(item, dict):
                 item.pop("origin_question", None)
         data[key] = sorted(items, key=lambda item: str(item.get("id", "")))
+    if not any((data.get("setup") or {}).values()):
+        data.pop("setup", None)
     return data
 
 

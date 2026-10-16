@@ -1,7 +1,7 @@
 import json
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import quote
 
@@ -13,7 +13,7 @@ from doubleblind_contract.capture_server import CapturedWebhook, WebhookCapture
 from doubleblind_contract.http_server import header_value
 from doubleblind_contract.loader import format_path
 from doubleblind_contract.matcher import match, resolve_path
-from doubleblind_contract.models import Contract, PartyRole, Scenario, Side
+from doubleblind_contract.models import Contract, DoAction, DoStep, PartyRole, Scenario, Side
 from doubleblind_contract.runtime import Failure, ScenarioResult, ScenarioStatus
 from doubleblind_contract.signing import verify
 from doubleblind_contract.stub_server import ProviderStub, ReceivedRequest
@@ -21,6 +21,7 @@ from doubleblind_contract.templating import TemplateError, render
 
 DEFAULT_WAIT_S = 2.0
 POLL_INTERVAL_S = 0.1
+E2E_STATE_WAIT_S = 10.0
 SNIPPET_LENGTH = 300
 
 Check = Callable[[], list[Failure]]
@@ -86,6 +87,7 @@ class ScenarioExecutor:
         status: ScenarioStatus = "passed"
         failures: list[Failure] = []
         try:
+            self.run_setup()
             for index, step in enumerate(self.scenario.steps):
                 self.step_index = index
                 self.run_step(step.kind, step.model_dump(mode="json", exclude_unset=True))
@@ -104,6 +106,33 @@ class ScenarioExecutor:
             round((time.monotonic() - started) * 1000),
             failures,
         )
+
+    def setup_steps(self) -> list[DoStep]:
+        parties: list[PartyRole] = (
+            ["provider", "consumer"] if self.scenario.side == "e2e" else [self.scenario.side]
+        )
+        steps: list[DoStep] = []
+        for party in parties:
+            planned = getattr(self.environment.contract.setup, party)
+            client = self.environment.parties.get(party)
+            if not planned or client is None:
+                continue
+            if "reset" in client.binding.actions:
+                steps.append(DoStep(do=DoAction(party=party, action="reset")))
+            steps += planned
+        return steps
+
+    def run_setup(self) -> None:
+        try:
+            for step in self.setup_steps():
+                self.run_step(step.kind, step.model_dump(mode="json", exclude_unset=True))
+        except StepFailed as failed:
+            raise StepFailed(
+                [
+                    replace(failure, message=f"setup: {failure.message}")
+                    for failure in failed.failures
+                ]
+            ) from failed
 
     def run_step(self, kind: str, dumped: Mapping[str, Any]) -> None:
         try:
@@ -340,7 +369,9 @@ class ScenarioExecutor:
                 ]
             return self.match_failures(body, spec["match"])
 
-        eventually = spec.get("eventually") or {}
+        eventually = spec.get("eventually") or (
+            {"timeout_s": E2E_STATE_WAIT_S} if self.scenario.side == "e2e" else {}
+        )
         self.raise_if(
             self.wait_for(
                 check,

@@ -11,6 +11,8 @@ write a BRIEF for the counterparty. The brief must NOT contain source code, file
 secrets, or real personal data. Describe concepts, representations, units, formats, constraints and edge cases
 in plain language. Use only synthetic examples. If you are the provider, list the capabilities you offer and
 ALL rules that the consumer must respect (including rules from internal docs), expressed as rules, not code.
+State only facts from the private system model and copy values (status names, limits, error codes) exactly; never add
+a value, limit or capability that is not in it.
 Output JSON matching the schema."""
 
 EGRESS_CLASSIFIER = """You are a data-loss-prevention filter between a company and its integration partner. Allowed: natural-language
@@ -37,13 +39,20 @@ Rules:
    An answered question is settled: turn the answer into a decision and never ask it again.
 4. Patches are RFC 6902 operations on the contract JSON. Keep the contract valid. Use only step types allowed for each side.
 5. If you are the provider and this is round 1: draft schemas, operations, webhooks, secrets, and provider-side scenarios
-   for every rule you know, including internal ones.
+   for every rule you know, including internal ones. Use exactly the values of your private system model (status names,
+   limits, error codes); never invent new ones.
 6. If you are the consumer: map your data to the contract, add consumer scenarios for your real edge cases (synthetic data),
-   and propose who converts what.
+   and propose who converts what. Operations, webhooks, schemas and secrets describe the provider's API: only the
+   provider changes them; ask for a change in your message.
 7. Before signing the contract needs e2e scenarios (side e2e, ids E<n>) for the main flows across both real systems,
    e.g. the consumer creates and pays an order, the provider shows the shipment, a status change reaches the consumer.
    They use do/expect_state of both parties and send; both bindings must later provide the actions they name.
-8. Every scenario tests a different behavior; never add a scenario that repeats an existing one.
+8. Every scenario tests a different behavior; never add a scenario that repeats an existing one. Scenarios cover only
+   behavior that crosses the boundary between the companies and that both systems already have or a human approved:
+   what the consumer sends, how it handles webhooks, what the provider accepts, rejects and emits. Never add scenarios
+   for internal behavior (retries, logging, alerts, timing), or for statuses and features the other system does not
+   have. Operations are only the provider API calls the consumer's integration makes. Keep the contract small: at most
+   9 consumer, 6 provider and 3 e2e scenarios.
 9. Set status to "ready_to_sign" only when you see no uncovered mismatch and no open question.
 10. When the other company is ready_to_sign, sign too (ready_to_sign, no patches) unless you can point to a blocking
    problem in the current contract, i.e. one that would make an implementation or a test fail. Optional improvements
@@ -88,8 +97,9 @@ Steps (one key per step):
 - expect_state {party, query, args?, match, eventually? {timeout_s, interval_s}}: all sides, party must fit the side.
 Match: keys are dotted paths (body.parcel.weight_g, headers.Idempotency-Key, status); literal = equality, object = subset;
 operators {$regex}, {$type}, {$exists}, {$gte}, {$lte}, {$in}, {$contains}, {$any: true}.
-Templates: {{ctx.x}}, {{secrets.name}}, {{env.NAME}}, {{now}}, {{uuid}}, {{args.x}}; in stubs also {{request.body.path}},
-{{request.headers.Name}}, {{seq}}.
+Templates: {{ctx.x}}, {{secrets.name}}, {{capture.url}}, {{now}}, {{uuid}}, {{args.x}}; in stubs also {{request.body.path}},
+{{request.headers.Name}}, {{seq}}. {{capture.url}} is where the consumer receives webhooks in provider and e2e tests; use
+it wherever a step registers a webhook URL (never an env variable, which the tests do not have).
 Capture (in send): {name: JSONPath into the response body}, e.g. capture: {shipment_id: "$.id"}; later steps use {{ctx.shipment_id}}.
 send has no args; only do and expect_state take args. {{ctx.x}} sees only values captured by earlier steps (a send
 captures for later steps, not for its own match). Every body.* path in a match must be a field of the matching schema.
@@ -105,7 +115,10 @@ The contract must be valid after every turn: at least one operation and at least
 empty sections, so the provider's first turn adds schemas, operations, webhooks, secrets, decisions and at most three
 provider scenarios; further scenarios come in later rounds. Never answer with no patches while the contract is still empty.
 Each step is an object with exactly one key (do, send, emit, expect_received, expect_no_request, expect_emitted or
-expect_state). Names in the example contract belong to another integration; never reuse them."""
+expect_state). Names in the example contract belong to another integration; never reuse them.
+setup {provider: [do steps], consumer: [do steps]}: before every scenario of a side and every e2e scenario the runner calls
+that party's reset action and then its setup (e.g. test credentials, webhook registration at {{capture.url}}). With a setup,
+scenarios never call reset or repeat a setup action. Each party writes only its own /setup/<side>."""
 
 CODER = """You are the implementation agent for {party} ({role}). Implement YOUR side of the signed contract in this repository.
 You can only change files in /workspace/repo. The counterparty is reachable only through the contract tests.
@@ -122,10 +135,38 @@ fit them, change the binding or the hooks. Call raise_contract_gap only when the
 impossible (e.g. two scenarios demand different results for the same input), with a precise description.
 Work in small steps: read the relevant code, edit, run contract_tests, fix. Call finish only when everything is green."""
 
+DRY_RUN = """You check a draft integration contract against the REAL system of {party} ({side}) before it goes to the other
+company, and make your own part of it true. The repository is your company's real application, unchanged. Write ONLY
+doubleblind.binding.yaml: how to start the app and which existing test-only endpoints (enabled by {test_hooks_env}) implement
+the actions and queries. Never change the application.
+Run contract_tests and look at every failing {side} scenario:
+- a binding mistake (wrong path, action name, capture, start command): fix the binding;
+- the contract describes your system wrongly (a path, field, header, status, error code or limit, or missing setup such as
+  creating a partner or registering a webhook first): correct the contract with patch_contract, a JSON Patch on your
+  operations, schemas, webhooks, secrets and {side} scenarios; setup is a do step calling an action of your binding.
+Never remove a scenario or an assertion to make it pass; correct wrong values instead. Run contract_tests after every change.
+Setup your system needs before every scenario (e.g. credentials created with the shared secret, the other side's webhook
+registered at {{{{capture.url}}}}) goes into /setup/{side} as do steps: the runner calls your reset action and then this
+setup before each of your scenarios and before each e2e scenario, so scenarios must not call reset or repeat setup actions;
+remove such steps from your {side} scenarios and from the provider steps of e2e scenarios.
+Call report_mismatches to finish once every {side} scenario passes or you cannot fix the rest: only scenarios that pass on
+the real system stay in the draft, the others are removed automatically."""
+
 TRIAGE = """You classify a failing contract test report for {party}. Categories: CODE_BUG (our implementation), CONTRACT_GAP
 (contract is wrong/ambiguous/contradictory), COUNTERPARTY_ISSUE (the other side violates the contract — only possible in e2e),
-ENV_ERROR (infrastructure). Give the coder a precise, actionable summary (may reference our logs and files).
+ENV_ERROR (infrastructure). In e2e decide from the gateway traffic: the consumer sends operations, the provider sends
+webhooks. A violation in a request we sent is our CODE_BUG. A request without violations that our app rejected or answered
+against the contract is our CODE_BUG, including test data our actions create (partners, credentials, webhook
+registrations) that does not use the contract's secrets or {{{{capture.url}}}}. CONTRACT_GAP when a scenario cannot pass as
+written (e.g. a needed setup step is missing). COUNTERPARTY_ISSUE only when the traffic clearly shows the other side broke
+the contract; when unsure, fix what is ours (CODE_BUG).
+Give the coder a precise, actionable summary (may reference our logs and files).
 Give the broker a sanitized one-sentence reason with NO code, paths, stack traces or data. Output JSON matching the schema."""
+
+E2E_MISSING_STEP = """In e2e, a step the scenario needs that is missing altogether is a CONTRACT_GAP naming that
+scenario, not a CODE_BUG: for example a webhook never arrives because no step registers the other side's webhook at
+{{capture.url}}, or no step creates the credentials a request uses. The contract then gets the missing setup step; never
+work around a missing step in application code."""
 
 BINDING_GUIDE = """How contract tests run (db-contract test <side> contract.yaml --binding doubleblind.binding.yaml):
 - The runner starts YOUR app with binding.app.start (cwd relative to the binding file) and waits for app.healthcheck.
@@ -141,3 +182,35 @@ BINDING_GUIDE = """How contract tests run (db-contract test <side> contract.yaml
   expect_emitted checks the webhooks your app sends to the capture server.
 - Test-only endpoints (reset, creating test data, advancing states) must be active only when the test hooks variable is set.
 Two valid bindings of a different integration follow; use them for shape only."""
+
+AMEND = """Your task in this turn: the signed contract is being amended only because of the reported gap.
+Change only what that gap needs, only in your own sections: no new scenarios or decisions, no other rewording. If the gap
+is already fixed, answer with no patches and status ready_to_sign."""
+
+PHASES = {
+    (
+        "provider",
+        True,
+    ): """Your task in this turn: the API is fixed. Add a decision (owner provider) for every rule of your
+private system model the consumer must respect (limits, formats, idempotency, webhook signing, error codes) and at most 6
+provider scenarios that test them. Use only facts of your private system model. Do not ask questions; status continue.""",
+    (
+        "consumer",
+        True,
+    ): """Your task in this turn: map your data to the provider's API. For every mismatch add a decision
+owned by you (who converts what and how) and consumer scenarios that test it (at most 9 in total), plus 1-3 e2e scenarios
+for the main flows across both systems. Use only facts of your private system model. Ask your human at most 2 business
+questions, and only about choices your private model does not settle.""",
+    (
+        "provider",
+        False,
+    ): """Your task in this turn: the contract is nearly complete. Change it only to fix a concrete problem
+you can name (a wrong value, an uncovered rule of yours, a scenario your system would fail); otherwise answer with no patches
+and status ready_to_sign.""",
+    (
+        "consumer",
+        False,
+    ): """Your task in this turn: the contract is nearly complete. Change it only to fix a concrete problem
+you can name (a wrong value, an uncovered conversion of yours, a scenario your system could not pass); otherwise answer with
+no patches and status ready_to_sign.""",
+}

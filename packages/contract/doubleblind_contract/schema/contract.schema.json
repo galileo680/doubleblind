@@ -67,6 +67,14 @@
       "type": "array",
       "items": { "$ref": "#/$defs/decision" }
     },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "array", "items": { "$ref": "#/$defs/setupStep" } },
+        "consumer": { "type": "array", "items": { "$ref": "#/$defs/setupStep" } }
+      }
+    },
     "scenarios": {
       "type": "array",
       "minItems": 1,
@@ -255,6 +263,12 @@
         "expect_emitted": { "$ref": "#/$defs/expectEmittedStep" },
         "expect_state": { "$ref": "#/$defs/expectStateStep" }
       }
+    },
+    "setupStep": {
+      "type": "object",
+      "required": ["do"],
+      "additionalProperties": false,
+      "properties": { "do": { "$ref": "#/$defs/doStep" } }
     },
     "doStep": {
       "type": "object",

@@ -1,6 +1,6 @@
 import re
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -56,7 +56,8 @@ RULE_COVERAGE = "rule 5"
 RULE_STUB_BODY = "rule 6"
 RULE_CONSISTENCY = "rule 7"
 PATH_PARAMETER = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
-MAX_SCENARIOS_PER_SIDE = 10
+MAX_SCENARIOS = {"consumer": 9, "provider": 6, "e2e": 3}
+PROVIDER_SECTIONS = ("operations", "webhooks", "schemas", "secrets")
 SIGNING_SIDES = {
     "consumer": "what the consumer must send and how it handles webhooks",
     "provider": "what the provider must accept, reject and emit",
@@ -270,6 +271,34 @@ def check_binding_name(
         )
 
 
+def check_setup(
+    contract: Contract, bindings: Mapping[PartyRole, Binding], report: ValidationReport
+) -> None:
+    for party in ("provider", "consumer"):
+        planned: list[DoStep] = getattr(contract.setup, party)
+        for index, step in enumerate(planned):
+            path = f"setup.{party}[{index}].do"
+            if step.do.party != party:
+                report.error(RULE_STEP_SIDE, f"{path}.party", f"setup.{party} runs {party} steps")
+            check_binding_name(
+                bindings.get(party), "action", step.do.action, f"{path}.action", report
+            )
+        if not planned:
+            continue
+        done = {"reset", *(step.do.action for step in planned)}
+        for scenario_index, scenario in enumerate(contract.scenarios):
+            if scenario.side not in (party, "e2e"):
+                continue
+            for step_index, item in enumerate(scenario.steps):
+                if isinstance(item, DoStep) and item.do.party == party and item.do.action in done:
+                    report.error(
+                        RULE_CONSISTENCY,
+                        step_path(scenario_index, step_index, item),
+                        f"setup.{party} already runs reset and '{item.do.action}' before every "
+                        "scenario; remove this step",
+                    )
+
+
 def check_secret_references(contract: Contract, report: ValidationReport) -> None:
     declared = {secret.name for secret in contract.secrets}
     for webhook_id, webhook in contract.webhooks.items():
@@ -437,7 +466,8 @@ def check_match_operators(contract: Contract, report: ValidationReport) -> None:
 def check_ctx_order(contract: Contract, report: ValidationReport) -> None:
     for scenario_index, scenario in enumerate(contract.scenarios):
         captured: set[str] = set()
-        after_action = False
+        parties = ["provider", "consumer"] if scenario.side == "e2e" else [scenario.side]
+        after_action = any(getattr(contract.setup, party) for party in parties)
         for step_index, step in enumerate(scenario.steps):
             path = step_path(scenario_index, step_index, step)
             used = ctx_names(step.model_dump(mode="json", exclude_unset=True))
@@ -470,48 +500,60 @@ def schema_branches(schema: Any) -> list[Mapping[str, Any]]:
     return branches
 
 
-def unknown_field(schema: Any, parts: Sequence[str]) -> str | None:
+def field_schema(schema: Any, parts: Sequence[str]) -> tuple[str | None, Any]:
     if not parts:
-        return None
+        return None, schema
     branches = schema_branches(schema)
     head, rest = parts[0], parts[1:]
     if head.isdigit():
         items = [branch["items"] for branch in branches if isinstance(branch.get("items"), Mapping)]
-        return unknown_field(items[0], rest) if items else None
+        return field_schema(items[0], rest) if items else (None, None)
     declared = [branch["properties"] for branch in branches if "properties" in branch]
     if not declared:
-        return None
+        return None, None
     for properties in declared:
         if head in properties:
-            return unknown_field(properties[head], rest)
-    return head
+            return field_schema(properties[head], rest)
+    return head, None
 
 
-def match_paths(match: Mapping[str, Any], prefix: str = "") -> list[str]:
-    paths = []
+def match_items(match: Mapping[str, Any], prefix: str = "") -> list[tuple[str, Any]]:
+    items = []
     for key, value in match.items():
         full = f"{prefix}{key}"
         if isinstance(value, Mapping) and value and not any(k.startswith("$") for k in value):
-            paths += match_paths(value, f"{full}.")
+            items += match_items(value, f"{full}.")
         else:
-            paths.append(full)
-    return paths
+            items.append((full, value))
+    return items
+
+
+def literal(value: Any) -> bool:
+    return not isinstance(value, Mapping | list) and not template_expressions(value)
 
 
 def check_match_fields(
     schema: Any, match: Mapping[str, Any] | None, path: str, report: ValidationReport
 ) -> None:
-    for dotted in match_paths(match or {}):
+    for dotted, value in match_items(match or {}):
         parts = dotted.split(".")
         if parts[0] != "body" or schema is None:
             continue
-        missing = unknown_field(schema, parts[1:])
+        missing, leaf = field_schema(schema, parts[1:])
         if missing is not None:
             report.error(
                 RULE_CONSISTENCY,
                 f"{path}.match",
                 f"'{dotted}' is not a field of the body schema ('{missing}' is not declared)",
             )
+        elif isinstance(leaf, Mapping) and literal(value):
+            for error in sorted_schema_errors(Draft202012Validator(leaf), value)[:1]:
+                report.error(
+                    RULE_CONSISTENCY,
+                    f"{path}.match",
+                    f"'{dotted}' expects {value!r}, which the body schema does not allow: "
+                    f"{error.message}; change the scenario to a value the schema allows",
+                )
 
 
 def check_match_schemas(contract: Contract, report: ValidationReport) -> None:
@@ -552,6 +594,7 @@ def validate_contract_data(
     except ContractLoadError as error:
         report.add_problems(RULE_REFS, error.problems)
     check_references(contract, {binding.side: binding for binding in bindings}, report)
+    check_setup(contract, {binding.side: binding for binding in bindings}, report)
     check_step_sides(contract, report)
     check_unique_ids(contract, report)
     check_decision_coverage(contract, report)
@@ -563,13 +606,45 @@ def validate_contract_data(
     return report
 
 
+def provider_scenarios(contract: Mapping[str, Any]) -> set[str]:
+    return {
+        str(index)
+        for index, item in enumerate(contract.get("scenarios") or [])
+        if item.get("side") == "provider"
+    }
+
+
+def foreign_patch(
+    path: str, role: str, api_locked: bool = False, provider_owned: Collection[str] = ()
+) -> str | None:
+    parts = path.strip("/").split("/")
+    if parts[0] in PROVIDER_SECTIONS and api_locked:
+        return (
+            f"/{parts[0]} comes from the provider's OpenAPI specification of its real system and "
+            "cannot change; make decisions and scenarios fit it"
+        )
+    if role == "consumer" and parts[0] == "scenarios" and parts[1:2] and parts[1] in provider_owned:
+        return (
+            "provider scenarios are checked by the provider on its real system; ask for a "
+            "change in your message instead"
+        )
+    if parts[0] in PROVIDER_SECTIONS and role == "consumer":
+        return (
+            f"/{parts[0]} is the provider's API and only the provider changes it; make your "
+            "decisions and scenarios fit it or ask the provider in your message"
+        )
+    if parts[0] == "setup" and (len(parts) < 2 or parts[1] != role):
+        return f"each party changes only its own setup: patch /setup/{role}"
+    return None
+
+
+def ownership_problems(patches: Iterable[Mapping[str, Any]], role: str) -> list[str]:
+    found = (foreign_patch(str(patch.get("path", "")), role) for patch in patches)
+    return sorted({problem for problem in found if problem})
+
+
 def signing_problems(data: Mapping[str, Any]) -> list[str]:
     scenarios = data.get("scenarios")
-    sides = {
-        scenario.get("side")
-        for scenario in (scenarios if isinstance(scenarios, list) else [])
-        if isinstance(scenario, dict)
-    }
     counts = Counter(
         scenario.get("side")
         for scenario in (scenarios if isinstance(scenarios, list) else [])
@@ -578,12 +653,12 @@ def signing_problems(data: Mapping[str, Any]) -> list[str]:
     return [
         f"ready_to_sign needs at least one {side} scenario ({purpose})"
         for side, purpose in SIGNING_SIDES.items()
-        if side not in sides
+        if side not in counts
     ] + [
-        f"ready_to_sign allows at most {MAX_SCENARIOS_PER_SIDE} {side} scenarios, found {count}; "
-        "merge scenarios that test the same behavior"
-        for side, count in counts.items()
-        if count > MAX_SCENARIOS_PER_SIDE
+        f"ready_to_sign allows at most {limit} {side} scenarios, found {counts[side]}; "
+        "keep only scenarios for behavior that crosses the boundary and merge the rest"
+        for side, limit in MAX_SCENARIOS.items()
+        if counts[side] > limit
     ]
 
 

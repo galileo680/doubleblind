@@ -1,0 +1,372 @@
+openapi: 3.1.0
+info:
+  title: Parcelly Partner API
+  version: 1.0.0
+  description: Parcel and pallet shipments for partner shops across the United Kingdom.
+servers:
+  - url: https://api.parcelly.example
+security:
+  - partner_api_key: []
+paths:
+  /v1/shipments:
+    post:
+      operationId: create_shipment
+      summary: Create a parcel shipment
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShipmentRequest"
+      responses:
+        "201":
+          description: Shipment created, or the earlier shipment for a repeated Idempotency-Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+              example:
+                id: shp_1
+                service: parcel
+                reference: ORD-1001
+                status: CREATED
+                tracking_number: PCL1GB
+                price_pence: 1299
+                receiver:
+                  name: John Smith
+                  phone: "+447700900200"
+                  address:
+                    street: Long Street
+                    building: "5"
+                    flat: "3"
+                    postcode: E1 6AN
+                    city: London
+                    country: GB
+                parcel:
+                  weight_g: 1200
+                  size: A
+                created_at: "2026-10-06T10:00:00.000Z"
+                updated_at: "2026-10-06T10:00:00.000Z"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+    get:
+      operationId: find_shipment
+      summary: Most recent shipment with a reference
+      parameters:
+        - name: reference
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The shipment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+              example:
+                id: shp_1
+                service: parcel
+                reference: ORD-1001
+                status: IN_TRANSIT
+                tracking_number: PCL1GB
+                price_pence: 1299
+                receiver:
+                  name: John Smith
+                  phone: "+447700900200"
+                  address:
+                    street: Long Street
+                    building: "5"
+                    postcode: E1 6AN
+                    city: London
+                    country: GB
+                parcel:
+                  weight_g: 1200
+                  size: A
+                created_at: "2026-10-06T10:00:00.000Z"
+                updated_at: "2026-10-06T11:00:00.000Z"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/shipments/{id}:
+    get:
+      operationId: get_shipment
+      summary: One shipment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The shipment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+              example:
+                id: shp_1
+                service: parcel
+                reference: ORD-1001
+                status: DELIVERED
+                tracking_number: PCL1GB
+                price_pence: 1299
+                receiver:
+                  name: John Smith
+                  phone: "+447700900200"
+                  address:
+                    street: Long Street
+                    building: "5"
+                    postcode: E1 6AN
+                    city: London
+                    country: GB
+                parcel:
+                  weight_g: 1200
+                  size: A
+                created_at: "2026-10-06T10:00:00.000Z"
+                updated_at: "2026-10-06T12:00:00.000Z"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/pallets:
+    post:
+      operationId: create_pallet
+      summary: Create a pallet shipment
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePalletRequest"
+      responses:
+        "201":
+          description: Pallet shipment created, or the earlier one for a repeated Idempotency-Key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shipment"
+              example:
+                id: plt_1
+                service: pallet
+                reference: ORD-1002
+                status: CREATED
+                tracking_number: PAL1GB
+                price_pence: 8900
+                receiver:
+                  name: Emma Brown
+                  phone: "+447700900300"
+                  address:
+                    street: Corn Street
+                    building: "1"
+                    postcode: BS1 1HQ
+                    city: Bristol
+                    country: GB
+                pallet:
+                  weight_g: 27000
+                  pallet_type: EUR
+                created_at: "2026-10-06T10:00:00.000Z"
+                updated_at: "2026-10-06T10:00:00.000Z"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+  /v1/webhooks:
+    post:
+      operationId: register_webhook
+      summary: Register or replace the partner's webhook endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookRegistration"
+      responses:
+        "201":
+          description: Webhook registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+              example:
+                url: https://shop.example.com/parcelly/webhook
+                events:
+                  - shipment.status_changed
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+webhooks:
+  shipment_status_changed:
+    post:
+      summary: Sent when a shipment moves to a different status
+      parameters:
+        - name: X-Parcelly-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: "^sha256=[0-9a-f]{64}$"
+      x-signature:
+        algorithm: hmac-sha256
+        header: X-Parcelly-Signature
+        format: "sha256={hex}"
+        over: raw_body
+        secret: webhook_secret
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShipmentStatusChanged"
+      responses:
+        "200":
+          description: Any 2xx confirms delivery
+components:
+  securitySchemes:
+    partner_api_key:
+      type: http
+      scheme: bearer
+      description: Partner API key issued by Parcelly
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 255
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Address:
+      type: object
+      required: [street, building, postcode, city, country]
+      additionalProperties: false
+      properties:
+        street: { type: string, minLength: 1, maxLength: 120 }
+        building: { type: string, minLength: 1, maxLength: 20 }
+        flat: { type: string, minLength: 1, maxLength: 20 }
+        postcode: { type: string, pattern: "^[A-Z]{1,2}\\d[A-Z\\d]? \\d[A-Z]{2}$" }
+        city: { type: string, minLength: 1, maxLength: 80 }
+        country: { const: GB }
+    Receiver:
+      type: object
+      required: [name, phone, address]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        phone: { type: string, pattern: "^\\+447\\d{9}$" }
+        address: { $ref: "#/components/schemas/Address" }
+    CreateShipmentRequest:
+      type: object
+      required: [reference, receiver, parcel]
+      additionalProperties: false
+      properties:
+        reference: { type: string, minLength: 1, maxLength: 64 }
+        receiver: { $ref: "#/components/schemas/Receiver" }
+        parcel:
+          type: object
+          required: [weight_g, size]
+          additionalProperties: false
+          properties:
+            weight_g: { type: integer, minimum: 1 }
+            size: { enum: [A, B, C] }
+    CreatePalletRequest:
+      type: object
+      required: [reference, receiver, pallet]
+      additionalProperties: false
+      properties:
+        reference: { type: string, minLength: 1, maxLength: 64 }
+        receiver: { $ref: "#/components/schemas/Receiver" }
+        pallet:
+          type: object
+          required: [weight_g, pallet_type]
+          additionalProperties: false
+          properties:
+            weight_g: { type: integer, minimum: 1 }
+            pallet_type: { const: EUR }
+    ShipmentStatus:
+      enum: [CREATED, COLLECTED, IN_TRANSIT, DELIVERED, RETURNED]
+    Shipment:
+      type: object
+      required:
+        [
+          id,
+          service,
+          reference,
+          status,
+          tracking_number,
+          price_pence,
+          receiver,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id: { type: string }
+        service: { enum: [parcel, pallet] }
+        reference: { type: string }
+        status: { $ref: "#/components/schemas/ShipmentStatus" }
+        tracking_number: { type: string }
+        price_pence: { type: integer }
+        receiver: { $ref: "#/components/schemas/Receiver" }
+        parcel:
+          type: object
+          properties:
+            weight_g: { type: integer }
+            size: { enum: [A, B, C] }
+        pallet:
+          type: object
+          properties:
+            weight_g: { type: integer }
+            pallet_type: { const: EUR }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WebhookRegistration:
+      type: object
+      required: [url, secret]
+      additionalProperties: false
+      properties:
+        url: { type: string, minLength: 1, maxLength: 2000 }
+        secret: { type: string, minLength: 1, maxLength: 256 }
+    WebhookEndpoint:
+      type: object
+      required: [url, events]
+      properties:
+        url: { type: string }
+        events: { type: array, items: { type: string } }
+    ShipmentStatusChanged:
+      type: object
+      required: [event, shipment_id, reference, status, occurred_at]
+      properties:
+        event: { const: shipment.status_changed }
+        shipment_id: { type: string }
+        reference: { type: string }
+        status: { $ref: "#/components/schemas/ShipmentStatus" }
+        occurred_at: { type: string, format: date-time }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }

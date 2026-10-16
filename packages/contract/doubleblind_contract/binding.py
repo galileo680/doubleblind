@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any, Literal
+from urllib.parse import urlsplit
 
 import httpx
 from jsonpath_ng import parse as parse_jsonpath
@@ -134,6 +135,11 @@ class ManagedApp:
             raise AppStartError(f"{self.name}: cannot start {command[0]}: {error}", "") from error
         self.wait_until_healthy(timeout_s)
 
+    @property
+    def origin(self) -> str:
+        parts = urlsplit(self.base_url)
+        return f"{parts.scheme}://{parts.netloc}"
+
     def wait_until_healthy(self, timeout_s: float) -> None:
         healthcheck = self.spec.healthcheck
         deadline = time.monotonic() + timeout_s
@@ -148,7 +154,7 @@ class ManagedApp:
                 return
             try:
                 response = httpx.request(
-                    healthcheck.method, f"{self.base_url}{healthcheck.path}", timeout=1.0
+                    healthcheck.method, f"{self.origin}{healthcheck.path}", timeout=1.0
                 )
                 if response.status_code < 400:
                     return
@@ -156,7 +162,7 @@ class ManagedApp:
                 pass
             time.sleep(0.2)
         raise AppStartError(
-            f"{self.name}: no healthy answer from {self.base_url} within {timeout_s:.0f} s",
+            f"{self.name}: no healthy answer from {self.origin} within {timeout_s:.0f} s",
             self.log_tail(),
         )
 

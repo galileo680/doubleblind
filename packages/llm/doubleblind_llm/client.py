@@ -65,7 +65,7 @@ API_KEY_ENV = "NEBIUS_API_KEY"
 REPLAY_DELAY_ENV = "DOUBLEBLIND_REPLAY_DELAY_MS"
 MAX_REPAIRS = 2
 MAX_ATTEMPTS = 5
-REQUEST_TIMEOUT_SECONDS = 180.0
+REQUEST_TIMEOUT_SECONDS = 600.0
 REPAIR_SYSTEM_PROMPT = (
     "You repair JSON documents. Return ONLY a corrected JSON object that satisfies the schema, "
     "keeping as much of the original content as possible."
@@ -75,6 +75,8 @@ CallListener = Callable[[LLMCallEvent], None]
 
 
 def is_retryable(error: BaseException) -> bool:
+    if isinstance(error, openai.APITimeoutError):
+        return False
     if isinstance(error, openai.RateLimitError | openai.APIConnectionError):
         return True
     return isinstance(error, openai.APIStatusError) and error.status_code >= 500

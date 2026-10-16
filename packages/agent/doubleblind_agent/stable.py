@@ -13,6 +13,7 @@ VOLATILE = (
     ),
     (re.compile(r"\b\d{2}:\d{2}:\d{2}(?:[.,]\d+)?\b"), "<time>"),
     (re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s)\b"), "<duration>"),
+    (re.compile(r'"duration_ms": \d+'), '"duration_ms": "<duration>"'),
     (re.compile(r"process \[\d+\]"), "process [<pid>]"),
     (re.compile(r"\b0x[0-9a-fA-F]+\b"), "0x<address>"),
     (re.compile(r"sha256=[0-9a-f]{64}"), "sha256=<hmac>"),

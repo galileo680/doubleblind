@@ -237,6 +237,15 @@ export function timeline(events: BrokerEvent[], session: SessionView | null): Ti
           "i",
         );
         break;
+      case "dry_run.result":
+        push(
+          "test",
+          Number(data.mismatches)
+            ? `${name(data.party)} ran the draft contract on its real system · ${String(data.mismatches)} mismatches sent back to negotiation`
+            : `${name(data.party)} ran the draft contract on its real system · no mismatches`,
+          Number(data.mismatches) ? "w" : "o",
+        );
+        break;
       case "coder.progress":
         push(
           "agent",

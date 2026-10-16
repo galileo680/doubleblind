@@ -53,13 +53,14 @@ from doubleblind_contract.loader import load_binding_text, load_contract_text, p
 from doubleblind_contract.runtime import RunReport
 from doubleblind_contract.validate import (
     check_binding_text,
+    ownership_problems,
     signing_problems,
     validate_contract_data,
 )
 from doubleblind_sandbox.provider import ProbeResult
 
 logger = logging.getLogger(__name__)
-MAX_E2E_RUNS = 3
+MAX_E2E_RUNS = 5
 AMENDMENT_ROUNDS = 8
 GATEWAY_FEEDBACK_FIELDS = ("party", "source", "method", "status", "violations")
 
@@ -189,8 +190,21 @@ class StandardLookupIn(BaseModel):
     sources: list[str] = Field(max_length=3)
 
 
+class DryRunIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["dry_run.result"]
+    mismatches: int = Field(ge=0)
+
+
 AgentEventIn = Annotated[
-    PsmBuiltIn | EgressIn | LlmCallIn | CoderProgressIn | SandboxCostIn | StandardLookupIn,
+    PsmBuiltIn
+    | EgressIn
+    | LlmCallIn
+    | CoderProgressIn
+    | SandboxCostIn
+    | StandardLookupIn
+    | DryRunIn,
     Field(discriminator="type"),
 ]
 
@@ -740,6 +754,8 @@ class BrokerService:
                     f"the current contract version is {record.current_contract_version}",
                     {"current_version": record.current_contract_version},
                 )
+            if owned := ownership_problems(turn.patches, party.role):
+                self.fail_turn(db, record, party, turn, owned, outbox)
             preset = self.preset(record.preset)
             payload = turn.model_dump()
             verdict = check_turn(payload, preset.allowlist())
@@ -1308,6 +1324,7 @@ class BrokerService:
         cost_usd: float,
     ) -> None:
         outbox = Outbox()
+        traffic = self.gateway_traffic(session_id)
         with open_session(self.engine) as db:
             record = self.session_record(db, session_id)
             if State(record.state) is not State.E2E:
@@ -1342,7 +1359,7 @@ class BrokerService:
             elif len(runs) >= MAX_E2E_RUNS:
                 self.apply_trigger(db, record, Trigger.FAILURE, outbox)
             else:
-                feedback = {"report": sanitized, "gateway": self.gateway_traffic(session_id)}
+                feedback = {"report": sanitized, "gateway": traffic}
                 record.e2e_feedback_json = json.dumps(feedback, ensure_ascii=False, default=str)
                 self.apply_trigger(db, record, Trigger.E2E_FAILED, outbox)
             db.add(record)
@@ -1395,7 +1412,8 @@ class BrokerService:
         | LlmCallIn
         | CoderProgressIn
         | SandboxCostIn
-        | StandardLookupIn,
+        | StandardLookupIn
+        | DryRunIn,
     ) -> dict[str, Any]:
         self.authorize(principal, session_id, "agent")
         party_key = principal.party_key or ""
@@ -1403,7 +1421,7 @@ class BrokerService:
         outbox = Outbox()
         with open_session(self.engine) as db:
             record = self.session_record(db, session_id)
-            if isinstance(event, PsmBuiltIn | CoderProgressIn | StandardLookupIn):
+            if isinstance(event, PsmBuiltIn | CoderProgressIn | StandardLookupIn | DryRunIn):
                 outbox.add(event.type, party_key, payload)
             elif isinstance(event, EgressIn):
                 counter = "blocked_count" if event.type == "egress.blocked" else "redacted_count"

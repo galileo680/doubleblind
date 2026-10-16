@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 from doubleblind_agent.models import TriageResult
-from doubleblind_agent.prompts import TRIAGE
+from doubleblind_agent.prompts import E2E_MISSING_STEP, TRIAGE
 from doubleblind_agent.stable import stable
 from doubleblind_llm import LLMClient, LLMRequest, Role
 
@@ -47,15 +47,16 @@ async def triage(llm: LLMClient, report: dict[str, Any], party: str) -> TriageRe
 async def triage_e2e(
     llm: LLMClient, feedback: dict[str, Any], party: str, side: str
 ) -> TriageResult:
-    return await classify(llm, e2e_triage_input(feedback, side), party)
+    return await classify(llm, e2e_triage_input(feedback, side), party, E2E_MISSING_STEP)
 
 
-async def classify(llm: LLMClient, content: str, party: str) -> TriageResult:
+async def classify(llm: LLMClient, content: str, party: str, rules: str = "") -> TriageResult:
+    system = TRIAGE.format(party=party) + (f"\n{rules}" if rules else "")
     response = await llm.complete(
         LLMRequest(
             role=Role.TRIAGE,
             messages=[
-                {"role": "system", "content": TRIAGE.format(party=party)},
+                {"role": "system", "content": system},
                 {"role": "user", "content": content},
             ],
             response_schema=TriageResult.model_json_schema(),

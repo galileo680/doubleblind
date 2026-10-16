@@ -33,6 +33,7 @@ def skeleton(preset: Preset) -> dict[str, Any]:
         "webhooks": {},
         "semantic_mappings": {},
         "decisions": [],
+        "setup": {"provider": [], "consumer": []},
         "scenarios": [],
     }
 
@@ -62,7 +63,7 @@ def apply_patches(contract: dict[str, Any], patches: list[dict[str, Any]]) -> di
                     f"patch {patch.get('op')} {target}: this field is managed by the broker"
                 )
     try:
-        result = jsonpatch.apply_patch(copy.deepcopy(contract), patches)
+        result = jsonpatch.apply_patch(copy.deepcopy(contract), copy.deepcopy(patches))
     except (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException, TypeError) as error:
         raise PatchError(f"patch cannot be applied: {error}") from error
     if not isinstance(result, dict):

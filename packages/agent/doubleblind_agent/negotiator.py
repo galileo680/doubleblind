@@ -1,3 +1,4 @@
+import copy
 import json
 from collections.abc import Callable
 from importlib.resources import files
@@ -8,10 +9,15 @@ from pydantic import ValidationError
 
 from doubleblind_agent.broker_client import BrokerClient
 from doubleblind_agent.models import Patch, Psm, TavilyTurn, Turn
-from doubleblind_agent.prompts import CONTRACT_GUIDE, NEGOTIATOR, TAVILY_RULE
+from doubleblind_agent.prompts import AMEND, CONTRACT_GUIDE, NEGOTIATOR, PHASES, TAVILY_RULE
 from doubleblind_agent.standards import enabled
 from doubleblind_contract.loader import parse_yaml
-from doubleblind_contract.validate import signing_problems, validate_contract_data
+from doubleblind_contract.validate import (
+    foreign_patch,
+    provider_scenarios,
+    signing_problems,
+    validate_contract_data,
+)
 from doubleblind_llm import LLMClient, LLMRequest, Role
 from doubleblind_llm.errors import StructuredOutputError
 
@@ -20,34 +26,102 @@ EXAMPLE_CONTRACT = files("doubleblind_agent").joinpath("example_contract.yaml").
 INTERNAL_FIXES = 4
 SHOWN_PROBLEMS = 25
 STRUCTURED_ATTEMPTS = 3
+MAX_QUESTIONS = 2
 
 
 PATCH_ERRORS = (jsonpatch.JsonPatchException, jsonpatch.JsonPointerException)
 
 
-def applicable_patches(
+STEP_KINDS = {
+    "do",
+    "send",
+    "emit",
+    "expect_received",
+    "expect_no_request",
+    "expect_emitted",
+    "expect_state",
+}
+
+
+def merged(item: Any) -> bool:
+    return isinstance(item, dict) and len(item) > 1 and set(item) <= STEP_KINDS
+
+
+def steps_of(item: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{kind: split_steps(body)} for kind, body in item.items() if body]
+
+
+def split_steps(value: Any) -> Any:
+    if isinstance(value, list):
+        return [
+            part
+            for item in value
+            for part in (steps_of(item) if merged(item) else [split_steps(item)])
+        ]
+    if isinstance(value, dict):
+        return {key: split_steps(item) for key, item in value.items()}
+    return value
+
+
+def split_patch(patch: dict[str, Any]) -> list[dict[str, Any]]:
+    head, _, last = patch["path"].rpartition("/")
+    if patch["op"] == "add" and merged(patch.get("value")) and (last == "-" or last.isdigit()):
+        parts = steps_of(patch["value"])
+        return [
+            {
+                **patch,
+                "path": f"{head}/{int(last) + index}" if last.isdigit() else patch["path"],
+                "value": part,
+            }
+            for index, part in enumerate(parts)
+        ]
+    if "value" in patch:
+        return [{**patch, "value": split_steps(patch["value"])}]
+    return [patch]
+
+
+def patched(document: dict[str, Any], patches: list[dict[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = jsonpatch.apply_patch(document, copy.deepcopy(patches))
+    return result
+
+
+def split_patches(
     contract: dict[str, Any], patches: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    document, kept = contract, []
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    document, kept, skipped = contract, [], []
     for patch in patches:
-        if not patch["path"].strip("/"):
-            continue
         variants = [patch, {**patch, "op": "add"}] if patch["op"] == "replace" else [patch]
-        for variant in variants:
+        for variant in variants if patch["path"].strip("/") else []:
             try:
-                document = jsonpatch.apply_patch(document, [variant])
+                document = patched(document, [variant])
             except PATCH_ERRORS:
                 continue
             kept.append(variant)
             break
-    return kept
+        else:
+            skipped.append(patch)
+    return kept, skipped
+
+
+def applicable_patches(
+    contract: dict[str, Any], patches: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    return split_patches(contract, patches)[0]
+
+
+def skipped_problems(contract: dict[str, Any], turn: Turn) -> list[str]:
+    return [
+        f"patch '{patch['op']} {patch['path']}' does not apply to the current contract (that path "
+        "does not exist there); rewrite it with the exact paths of the current contract"
+        for patch in split_patches(contract, turn.patch_list())[1]
+    ]
 
 
 def cited(
     contract: dict[str, Any], turn: TavilyTurn, standards: list[dict[str, Any]]
 ) -> TavilyTurn:
     known = {url for item in standards for url in item["sources"]}
-    document = jsonpatch.apply_patch(contract, applicable_patches(contract, turn.patch_list()))
+    document = patched(contract, applicable_patches(contract, turn.patch_list()))
     decisions = [item if isinstance(item, dict) else {} for item in document.get("decisions") or []]
     extra = []
     for citation in turn.citations:
@@ -66,8 +140,18 @@ def cited(
     return turn.model_copy(update={"patches": [*turn.patches, *extra]})
 
 
+def valid_subset(contract: dict[str, Any], turn: Turn) -> Turn:
+    kept: list[Patch] = []
+    errors = len(patch_errors(contract, turn.model_copy(update={"patches": []})))
+    for item in turn.patches:
+        count = len(patch_errors(contract, turn.model_copy(update={"patches": [*kept, item]})))
+        if count <= errors:
+            kept, errors = [*kept, item], count
+    return turn.model_copy(update={"patches": kept if errors == 0 else []})
+
+
 def patch_errors(contract: dict[str, Any], turn: Turn) -> list[str]:
-    candidate = jsonpatch.apply_patch(contract, applicable_patches(contract, turn.patch_list()))
+    candidate = patched(contract, applicable_patches(contract, turn.patch_list()))
     candidate = {**candidate, "version": contract["version"] + 1, "status": "proposed"}
     problems = [finding.render() for finding in validate_contract_data(candidate).errors]
     if turn.status == "ready_to_sign":
@@ -134,6 +218,13 @@ def messages(
         "Phone numbers and e-mail addresses in examples may only be these synthetic values: "
         + ", ".join([*synthetic["phones"], *synthetic["emails"]]),
     ]
+    if context.get("api_from_spec"):
+        parts.insert(
+            2,
+            "Your API (operations, schemas, webhooks, secrets) comes from your OpenAPI "
+            "specification and is already in the contract. It is fixed: never patch these "
+            "sections; negotiate decisions and scenarios that use them.",
+        )
     if enabled():
         parts.insert(
             5,
@@ -142,11 +233,22 @@ def messages(
         )
     if context.get("gap"):
         gap = context["gap"]
+        named = [
+            item
+            for item in context["contract"].get("scenarios") or []
+            if item.get("id") in gap["scenario_ids"]
+        ]
         parts.append(
             f"The signed contract could not be implemented: {gap['party']} reported a contract gap "
             f"in scenarios {', '.join(gap['scenario_ids']) or 'not given'}: {gap['description']}\n"
-            "Fix the contract so both sides can implement and test it, then set ready_to_sign."
+            + "".join(
+                f"Current steps of {item['id']}: {json.dumps(item.get('steps'))}\n"
+                for item in named
+            )
+            + "Fix the contract so both sides can implement and test it, then set ready_to_sign."
         )
+    first = not any(turn["party"] == party for turn in context["turns"])
+    parts.append(AMEND if context.get("gap") else PHASES[(role, first)])
     if feedback:
         parts.append(
             "Your previous attempt was rejected; fix these problems:\n"
@@ -191,6 +293,11 @@ async def propose_turn(
 ) -> dict[str, Any]:
     model = TavilyTurn if enabled() else Turn
 
+    def parsed(answer: Any) -> Turn:
+        turn = model.model_validate(answer)
+        parts = [part for item in turn.patches for part in split_patch(item.model_dump())]
+        return turn.model_copy(update={"patches": [Patch.model_validate(part) for part in parts]})
+
     async def ask(conversation: list[dict[str, Any]], role_name: Role = Role.NEGOTIATOR) -> Turn:
         request = LLMRequest(
             role=role_name,
@@ -200,18 +307,47 @@ async def propose_turn(
         )
         for _ in range(STRUCTURED_ATTEMPTS - 1):
             try:
-                return model.model_validate((await llm.complete(request)).parsed)
+                return parsed((await llm.complete(request)).parsed)
             except (StructuredOutputError, ValidationError):
                 continue
-        return model.model_validate((await llm.complete(request)).parsed)
+        return parsed((await llm.complete(request)).parsed)
+
+    locked = bool(context.get("api_from_spec"))
+    provider_owned = provider_scenarios(context["contract"])
+
+    def foreign(candidate: Turn) -> list[str]:
+        paths = [item.path for item in candidate.patches]
+        return sorted(
+            {
+                reason
+                for path in paths
+                if (reason := foreign_patch(path, role, locked, provider_owned))
+            }
+        )
+
+    def own(candidate: Turn) -> Turn:
+        kept = [
+            patch
+            for patch in candidate.patches
+            if not foreign_patch(patch.path, role, locked, provider_owned)
+        ]
+        return candidate.model_copy(update={"patches": kept})
 
     def problems_of(candidate: Turn) -> list[str]:
-        return patch_errors(context["contract"], candidate) + vet(turn_payload(context, candidate))
+        return (
+            skipped_problems(context["contract"], candidate)
+            + patch_errors(context["contract"], candidate)
+            + vet(turn_payload(context, candidate))
+        )
 
     conversation = messages(psm, party, role, context, synthetic, feedback)
-    turn = await ask(conversation)
+    first = await ask(conversation)
+    pending = foreign(first)
+    dropped = set(pending)
+    turn = own(first)
     for _ in range(INTERNAL_FIXES):
-        problems = problems_of(turn)
+        problems = [f"a patch was not applied: {reason}" for reason in pending]
+        problems += problems_of(turn)
         if not problems:
             break
         conversation = [
@@ -229,19 +365,36 @@ async def propose_turn(
             fix = await ask(conversation, Role.NEGOTIATOR_FIX)
         except (StructuredOutputError, ValidationError):
             break
+        pending = foreign(fix)
+        dropped.update(pending)
+        fix = own(fix)
         appended = turn.model_copy(update={"patches": [*turn.patches, *fix.patches]})
         replaced = turn.model_copy(update={"patches": fix.patches})
-        turn = min(appended, replaced, key=lambda candidate: len(problems_of(candidate)))
-    if patch_errors(context["contract"], turn):
+        turn = min(appended, replaced, turn, key=lambda candidate: len(problems_of(candidate)))
+    if dropped:
         turn = turn.model_copy(
+            update={"message": f"{turn.message}\n(Not applied: {'; '.join(sorted(dropped))}.)"}
+        )
+    if patch_errors(context["contract"], turn):
+        turn = valid_subset(context["contract"], turn).model_copy(
             update={
-                "patches": [],
                 "status": "continue",
-                "message": f"{turn.message}\n(My contract changes in this turn did not validate "
-                "and were dropped; I will propose them again.)",
+                "message": f"{turn.message}\n(Some of my contract changes in this turn did not "
+                "validate and were dropped; I will propose them again.)",
             }
         )
     elif isinstance(turn, TavilyTurn):
         turn = cited(context["contract"], turn, context.get("standards", []))
+    turn = turn.model_copy(update={"questions_for_human": turn.questions_for_human[:MAX_QUESTIONS]})
+    changed = applicable_patches(context["contract"], turn.patch_list())
+    if patched(context["contract"], changed) == context["contract"]:
+        turn = turn.model_copy(update={"patches": []})
+    if (
+        not turn.patches
+        and not turn.questions_for_human
+        and any(item["party"] == party for item in context["turns"])
+        and not signing_problems(context["contract"])
+    ):
+        turn = turn.model_copy(update={"status": "ready_to_sign"})
     lookups = turn.lookup_standards if isinstance(turn, TavilyTurn) else []
     return {**turn_payload(context, turn), "lookup_standards": lookups}

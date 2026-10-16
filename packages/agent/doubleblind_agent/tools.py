@@ -276,7 +276,8 @@ class Toolbox:
     async def tool_search(self, pattern: str, glob: str | None = None) -> str:
         scope = f" -g {shlex.quote(glob)}" if glob else ""
         result = await self.shell(
-            f"rg -n --sort path --no-heading --max-columns 300 -e {shlex.quote(pattern)}{scope} ."
+            f"rg -n --sort path --no-heading --max-columns 300 -e {shlex.quote(pattern)}{scope}"
+            " -g '!.git' ."
             f" | head -n {SEARCH_LIMIT}"
         )
         return result.stdout.strip() or "no matches"
@@ -285,7 +286,14 @@ class Toolbox:
         await self.sandbox.write_files(self.workspace, {inside_repo(path): content.encode("utf-8")})
         self.changed.add(path)
 
-    async def tool_write_file(self, path: str, content: str) -> str:
+    async def tool_write_file(self, path: str, content: str | None = None) -> str:
+        if posixpath.basename(path) == "contract.yaml":
+            raise ToolError(
+                "contract_tests supplies the signed contract itself; never write it to the "
+                "repository. Change the code and the binding, then run contract_tests."
+            )
+        if content is None:
+            raise ToolError("write_file needs the full content of the file")
         await self.write(path, content)
         return f"wrote {path} ({len(content.splitlines())} lines)"
 
