@@ -5,11 +5,10 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import httpx
 
-import doubleblind_sandbox.relay_client as relay_module
 from doubleblind_contract.loader import load_binding_text
 from doubleblind_contract.models import Binding
 from doubleblind_contract.runner import run_e2e_tests
@@ -22,11 +21,9 @@ from doubleblind_contract.runtime import (
     utc_timestamp,
 )
 from doubleblind_contract.templating import render
-from doubleblind_sandbox.provider import ServiceHandle, ServiceSandbox, repo_path
+from doubleblind_sandbox.provider import ServiceHandle, ServiceSandbox, start_relayed_app
 
 E2E_BINDING_FILE = "doubleblind.binding.e2e.yaml"
-RELAY_SOURCE = Path(relay_module.__file__).read_bytes()
-RELAY_FILE = ".doubleblind-relay.py"
 HEALTH_TIMEOUT_S = 240.0
 HEALTH_RETRY_S = 1.0
 
@@ -144,6 +141,67 @@ class E2EParty:
     url: str
 
 
+def gateway_environment(request: E2ERequest, broker_url: str) -> dict[str, str]:
+    gateway = f"{broker_url}/gw/{request.session_id}"
+    return e2e_environment(request, {}, lambda party, port: f"{gateway}/{party}")
+
+
+def gateway_parties(request: E2ERequest, env: Mapping[str, str]) -> list[E2EParty]:
+    return [
+        E2EParty(
+            request.provider_party,
+            load_binding_text(request.provider_binding, env=env),
+            int(env["PROVIDER_PORT"]),
+            env["PROVIDER_BASE_URL"],
+        ),
+        E2EParty(
+            request.consumer_party,
+            load_binding_text(request.consumer_binding, env=env),
+            int(env["CONSUMER_PORT"]),
+            env["CONSUMER_BASE_URL"],
+        ),
+    ]
+
+
+def app_env(request: E2ERequest, env: Mapping[str, str], party: E2EParty) -> dict[str, str]:
+    app = party.binding.app
+    if app is None or app.start is None:
+        raise E2ESetupError(f"{party.key}: the binding has no app start command")
+    variables = {
+        "secrets": dict(request.secrets),
+        "env": dict(env),
+        "stub": {"url": env["PROVIDER_BASE_URL"]},
+        "capture": {"url": env.get("CONSUMER_WEBHOOK_URL", "")},
+    }
+    rendered = {key: str(value) for key, value in render(app.env, variables).items()}
+    return {
+        **rendered,
+        "DOUBLEBLIND_RELAY_TOKEN": request.relay_tokens[party.key],
+        "DOUBLEBLIND_APP_COMMAND": app.start,
+        "DOUBLEBLIND_APP_CWD": app.cwd,
+        "PYTHONUNBUFFERED": "1",
+    }
+
+
+async def wait_until_healthy(parties: Sequence[E2EParty]) -> None:
+    deadline = time.monotonic() + HEALTH_TIMEOUT_S
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        for party in parties:
+            health = party.binding.app.healthcheck if party.binding.app else None
+            if health is None:
+                continue
+            while True:
+                try:
+                    response = await http.request(health.method, f"{party.url}{health.path}")
+                    if response.status_code < 400:
+                        break
+                except httpx.TransportError:
+                    pass
+                if time.monotonic() > deadline:
+                    raise E2ESetupError(f"{party.key}: the app did not become healthy")
+                await asyncio.sleep(HEALTH_RETRY_S)
+
+
 class SandboxGatewayE2E:
     def __init__(self, sandbox_factory: Callable[[], ServiceSandbox], broker_url: str) -> None:
         self.sandbox_factory = sandbox_factory
@@ -157,86 +215,26 @@ class SandboxGatewayE2E:
             return error_report(request, message), 0.0
         return asyncio.run(self.execute(request))
 
-    def parties(self, request: E2ERequest, env: Mapping[str, str]) -> list[E2EParty]:
-        return [
-            E2EParty(
-                request.provider_party,
-                load_binding_text(request.provider_binding, env=env),
-                int(env["PROVIDER_PORT"]),
-                env["PROVIDER_BASE_URL"],
-            ),
-            E2EParty(
-                request.consumer_party,
-                load_binding_text(request.consumer_binding, env=env),
-                int(env["CONSUMER_PORT"]),
-                env["CONSUMER_BASE_URL"],
-            ),
-        ]
-
-    def app_env(
-        self, request: E2ERequest, env: Mapping[str, str], party: E2EParty
-    ) -> dict[str, str]:
-        app = party.binding.app
-        if app is None or app.start is None:
-            raise E2ESetupError(f"{party.key}: the binding has no app start command")
-        variables = {
-            "secrets": dict(request.secrets),
-            "env": dict(env),
-            "stub": {"url": env["PROVIDER_BASE_URL"]},
-            "capture": {"url": env.get("CONSUMER_WEBHOOK_URL", "")},
-        }
-        rendered = {key: str(value) for key, value in render(app.env, variables).items()}
-        return {
-            **rendered,
-            "DOUBLEBLIND_RELAY_TOKEN": request.relay_tokens[party.key],
-            "DOUBLEBLIND_APP_COMMAND": app.start,
-            "DOUBLEBLIND_APP_CWD": app.cwd,
-            "PYTHONUNBUFFERED": "1",
-        }
-
-    def relay_command(self, sandbox: ServiceSandbox, request: E2ERequest, party: E2EParty) -> str:
-        return (
-            f"{sandbox.python} {RELAY_FILE} --broker {self.broker_url}"
-            f" --session {request.session_id} --party {party.key}"
-            f" --target http://127.0.0.1:{party.port}"
-        )
-
-    async def wait_until_healthy(self, parties: Sequence[E2EParty]) -> None:
-        deadline = time.monotonic() + HEALTH_TIMEOUT_S
-        async with httpx.AsyncClient(timeout=30.0) as http:
-            for party in parties:
-                health = party.binding.app.healthcheck if party.binding.app else None
-                if health is None:
-                    continue
-                while True:
-                    try:
-                        response = await http.request(health.method, f"{party.url}{health.path}")
-                        if response.status_code < 400:
-                            break
-                    except httpx.TransportError:
-                        pass
-                    if time.monotonic() > deadline:
-                        raise E2ESetupError(f"{party.key}: the app did not become healthy")
-                    await asyncio.sleep(HEALTH_RETRY_S)
-
     async def execute(self, request: E2ERequest) -> E2EOutcome:
-        gateway = f"{self.broker_url}/gw/{request.session_id}"
-        env = e2e_environment(request, {}, lambda party, port: f"{gateway}/{party}")
-        parties = self.parties(request, env)
+        env = gateway_environment(request, self.broker_url)
+        parties = gateway_parties(request, env)
         sandbox = self.sandbox_factory()
         handles: list[ServiceHandle] = []
         try:
             for party in parties:
                 workspace = await sandbox.open_workspace(party.key, request.images[party.key])
                 handles.append(
-                    await sandbox.start_service(
+                    await start_relayed_app(
+                        sandbox,
                         workspace,
-                        self.relay_command(sandbox, request, party),
-                        env=self.app_env(request, env, party),
-                        files={repo_path(RELAY_FILE): RELAY_SOURCE},
+                        self.broker_url,
+                        request.session_id,
+                        party.key,
+                        party.port,
+                        app_env(request, env, party),
                     )
                 )
-            await self.wait_until_healthy(parties)
+            await wait_until_healthy(parties)
             report = await asyncio.to_thread(run_with_files, request, {**os.environ, **env})
         except E2ESetupError as error:
             report = error_report(request, str(error))
@@ -245,3 +243,37 @@ class SandboxGatewayE2E:
                 await sandbox.stop_service(handle)
             await sandbox.aclose()
         return report, sandbox.spent_usd
+
+
+class AgentServedE2E:
+    def __init__(self, broker_url: str | None) -> None:
+        self.broker_url = broker_url.rstrip("/") if broker_url else None
+        self.serving: dict[str, dict[str, dict[str, Any]]] = {}
+
+    async def run(
+        self, request: E2ERequest, attempt: int, announce: Callable[[], None]
+    ) -> E2EOutcome:
+        if self.broker_url is None:
+            announce()
+            message = "set BROKER_PUBLIC_URL so the agents' sandboxes can reach the gateway"
+            return error_report(request, message), 0.0
+        env = gateway_environment(request, self.broker_url)
+        try:
+            parties = gateway_parties(request, env)
+            self.serving[request.session_id] = {
+                party.key: {
+                    "attempt": attempt,
+                    "broker_url": self.broker_url,
+                    "port": party.port,
+                    "env": app_env(request, env, party),
+                }
+                for party in parties
+            }
+            announce()
+            await wait_until_healthy(parties)
+            report = await asyncio.to_thread(run_with_files, request, {**os.environ, **env})
+        except E2ESetupError as error:
+            report = error_report(request, str(error))
+        finally:
+            self.serving.pop(request.session_id, None)
+        return report, 0.0

@@ -1,6 +1,9 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, Protocol
+
+import doubleblind_sandbox.relay_client as relay_client
 
 REPO_DIR = "/workspace/repo"
 DEFAULT_TIMEOUT_S = 300
@@ -116,3 +119,25 @@ def branch(workspace: Workspace) -> Workspace:
 
 def repo_path(relative: str) -> str:
     return f"{REPO_DIR}/{relative.lstrip('/')}"
+
+
+RELAY_FILE = ".doubleblind-relay.py"
+RELAY_SOURCE = Path(relay_client.__file__).read_bytes()
+
+
+async def start_relayed_app(
+    sandbox: ServiceSandbox,
+    workspace: Workspace,
+    broker_url: str,
+    session_id: str,
+    party: str,
+    port: int,
+    env: Mapping[str, str],
+) -> ServiceHandle:
+    command = (
+        f"{sandbox.python} {RELAY_FILE} --broker {broker_url} --session {session_id}"
+        f" --party {party} --target http://127.0.0.1:{port}"
+    )
+    return await sandbox.start_service(
+        workspace, command, env=env, files={repo_path(RELAY_FILE): RELAY_SOURCE}
+    )

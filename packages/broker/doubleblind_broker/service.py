@@ -27,7 +27,13 @@ from doubleblind_broker.db import (
     TurnRecord,
     open_session,
 )
-from doubleblind_broker.e2e import E2EExecutor, E2EOutcome, E2ERequest, UnavailableE2E
+from doubleblind_broker.e2e import (
+    AgentServedE2E,
+    E2EExecutor,
+    E2EOutcome,
+    E2ERequest,
+    UnavailableE2E,
+)
 from doubleblind_broker.events import EventLog, utc_now
 from doubleblind_broker.gateway import (
     Allowlist,
@@ -219,6 +225,7 @@ class BrokerSettings:
     autopilot_delay_s: float = 1.5
     admin_token: str | None = None
     next_action_wait_s: float = 25.0
+    public_url: str | None = None
 
 
 @dataclass
@@ -248,6 +255,7 @@ class BrokerService:
         self.settings = settings
         self.isolation_probe = isolation_probe
         self.e2e_executor: E2EExecutor = e2e_executor or UnavailableE2E()
+        self.agent_e2e = AgentServedE2E(settings.public_url)
         self.simulator: HumanSimulator = simulator or DefaultOptionSimulator()
         self.events = EventLog(engine)
         self.autopilot_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -706,6 +714,9 @@ class BrokerService:
                     context["sanitized_e2e"] = json.loads(record.e2e_feedback_json)
                     return {"action": "fix_after_e2e", "context": context}
                 return {"action": "implement", "context": context}
+            serve = self.agent_e2e.serving.get(session_id, {}).get(party.party_key)
+            if state is State.E2E and serve is not None:
+                return {"action": "serve_e2e", "context": serve}
             return {"action": "wait", "context": {"state": state.value}}
 
     def submit_brief(
@@ -1299,8 +1310,15 @@ class BrokerService:
     async def execute_e2e(self, session_id: str, attempt: int) -> E2EOutcome:
         started = Outbox()
         started.add("e2e.started", "broker", {"attempt": attempt})
+        request = self.e2e_request(session_id)
+        with open_session(self.engine) as db:
+            link = db.get(IntegrationSessionRecord, session_id)
+        if link is not None and not link.recorded:
+            return await self.agent_e2e.run(
+                request, attempt, lambda: self.flush(session_id, started)
+            )
         self.flush(session_id, started)
-        return await asyncio.to_thread(self.e2e_executor.run, self.e2e_request(session_id))
+        return await asyncio.to_thread(self.e2e_executor.run, request)
 
     async def run_e2e(self, session_id: str) -> None:
         try:

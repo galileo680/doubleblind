@@ -30,6 +30,7 @@ def settings_from_env() -> BrokerSettings:
         autopilot=os.environ.get("DOUBLEBLIND_AUTOPILOT", "0") == "1",
         autopilot_delay_s=int(os.environ.get("DOUBLEBLIND_AUTOPILOT_DELAY_MS", "1500")) / 1000,
         admin_token=os.environ.get("DOUBLEBLIND_ADMIN_TOKEN") or None,
+        public_url=gateway_url(sandbox_kind(), os.environ.get("BROKER_PORT", "8000")),
     )
 
 

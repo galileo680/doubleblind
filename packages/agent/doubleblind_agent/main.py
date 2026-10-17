@@ -24,12 +24,14 @@ from doubleblind_contract.loader import parse_yaml
 from doubleblind_llm import LLMClient
 from doubleblind_llm.domain import LLMCallEvent
 from doubleblind_sandbox.environment import recorded_bases, remote_sandbox
-from doubleblind_sandbox.provider import ServiceSandbox, Workspace
+from doubleblind_sandbox.provider import ServiceSandbox, Workspace, start_relayed_app
 
 SandboxFactory = Callable[[], ServiceSandbox]
 MAX_CONTINUATIONS = 2
 MAX_DRY_RUNS = 3
-ACTIONS = frozenset({"build_psm_and_brief", "negotiate", "amend", "implement", "fix_after_e2e"})
+ACTIONS = frozenset(
+    {"build_psm_and_brief", "negotiate", "amend", "implement", "fix_after_e2e", "serve_e2e"}
+)
 
 
 UNDELIVERED_WEBHOOKS = (
@@ -419,7 +421,32 @@ class PartyRuntime:
         found = {**feedback, "our_triage": verdict.summary_for_coder}
         return await self.implement(broker, {**context, "sanitized_e2e": found})
 
+    async def serve_e2e(self, broker: BrokerClient, context: dict[str, Any]) -> None:
+        sandbox = self.sandbox()
+        try:
+            handle = await start_relayed_app(
+                sandbox,
+                await self.workspace(sandbox),
+                context["broker_url"],
+                self.config.session_id,
+                self.config.party,
+                context["port"],
+                context["env"],
+            )
+            self.log.append(f"serving our app for end-to-end attempt {context['attempt']}")
+            try:
+                while await broker.next_action() == {"action": "serve_e2e", "context": context}:
+                    pass
+            finally:
+                await sandbox.stop_service(handle)
+        finally:
+            await sandbox.aclose()
+        await self.report_sandbox_cost(broker, sandbox)
+
     async def act(self, broker: BrokerClient, name: str, context: dict[str, Any]) -> bool:
+        if name == "serve_e2e":
+            await self.serve_e2e(broker, context)
+            return True
         if name == "build_psm_and_brief":
             await self.build_psm_and_brief(broker, context)
             return True
