@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import re
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -186,7 +187,8 @@ def run_agents(
     probe = (
         SandboxIsolationProbe(factory, bases, kind == "tokenfactory") if kind != "local" else None
     )
-    service = BrokerService(build_engine("sqlite://"), settings, executor, None, probe)
+    engine = build_engine("sqlite://")
+    service = BrokerService(engine, settings, executor, None, probe)
     host = "0.0.0.0" if kind == "docker" else "127.0.0.1"
     serving = nullcontext(broker.rstrip("/")) if broker else running_broker(service, port, host)
     admin_token = os.environ.get("DOUBLEBLIND_ADMIN_TOKEN")
@@ -225,6 +227,9 @@ def run_agents(
             "certificate": admin.get(f"{sessions}/certificate", headers=observer).json(),
             "probe": admin.post(f"{sessions}/isolation-probe", headers=observer).json(),
         }
+        if target := os.environ.get("DOUBLEBLIND_DEMO_DB"):
+            with sqlite3.connect(target) as copy:
+                engine.raw_connection().driver_connection.backup(copy)
         if hold:
             hold_broker(url)
         return outcome
