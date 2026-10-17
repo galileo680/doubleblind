@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from doubleblind_agent.main import PartyConfig, PartyRuntime
+from doubleblind_agent.main import PATCH_FILE, PartyConfig, PartyRuntime
 from doubleblind_llm.settings import PACKAGE_REPO_ROOT, load_dotenv, read_yaml
 from doubleblind_sandbox.environment import remote_sandbox
 from doubleblind_sandbox.images import CONFIG_FILE, contract_wheel, ensure_base_image, repo_plan
@@ -17,11 +17,20 @@ POLL_S = 5.0
 CONTRACT_PACKAGE = PACKAGE_REPO_ROOT / "packages" / "contract"
 
 
+def git(repo: Path, *arguments: str) -> str | None:
+    result = subprocess.run(["git", *arguments], cwd=repo, capture_output=True, text=True)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def commit_of(repo: Path) -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=repo, capture_output=True, text=True
-    )
-    return result.stdout.strip() if result.returncode == 0 else "no git"
+    return git(repo, "rev-parse", "--short", "HEAD") or "no git"
+
+
+def apply_hint(repo: Path, patch: Path) -> str:
+    root = git(repo, "rev-parse", "--show-toplevel") or str(repo)
+    folder = (git(repo, "rev-parse", "--show-prefix") or "").rstrip("/")
+    option = f"--directory={folder} " if folder else ""
+    return f"in {root} run: git apply {option}{patch.as_posix()}"
 
 
 async def build_base(repo: Path, kind: str) -> str:
@@ -55,6 +64,9 @@ def run_session(broker: str, key: str, session: dict[str, str], base: str, kind:
         print(f"stopped: {type(error).__name__}: {error}")
     for line in runtime.log:
         print(f"[{session['party']}] {line}")
+    patch = config.state_dir / PATCH_FILE
+    if patch.is_file():
+        print(f"our changes are in {patch}; review them, then {apply_hint(Path.cwd(), patch)}")
     return True
 
 

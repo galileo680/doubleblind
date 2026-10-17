@@ -29,6 +29,7 @@ from doubleblind_sandbox.provider import ServiceSandbox, Workspace, start_relaye
 SandboxFactory = Callable[[], ServiceSandbox]
 MAX_CONTINUATIONS = 2
 MAX_DRY_RUNS = 3
+PATCH_FILE = "changes.patch"
 ACTIONS = frozenset(
     {"build_psm_and_brief", "negotiate", "amend", "implement", "fix_after_e2e", "serve_e2e"}
 )
@@ -343,6 +344,7 @@ class PartyRuntime:
             binding = await toolbox.read_text(BINDING_FILE) if outcome.kind == "done" else ""
             if outcome.kind == "done":
                 diff = await toolbox.shell(f"git diff --stat {toolbox.base_commit} HEAD")
+                patch = await toolbox.shell(f"git diff --binary {toolbox.base_commit} HEAD")
                 await sandbox.tag(workspace, f"doubleblind-{party}-{self.config.session_id}")
         finally:
             await sandbox.aclose()
@@ -364,8 +366,12 @@ class PartyRuntime:
             return self.continuations <= MAX_CONTINUATIONS
         if outcome.report is None:
             return False
+        (self.config.state_dir / PATCH_FILE).write_bytes(patch.stdout.encode("utf-8"))
         (self.config.state_dir / "PR.md").write_text(
-            f"# DoubleBlind: {party}\n\n{outcome.summary}\n\n```\n{diff.stdout}\n```\n",
+            f"# DoubleBlind: {party}\n\n{outcome.summary}\n\n```\n{diff.stdout}\n```\n\n"
+            f"All changes are in {PATCH_FILE} next to this file. Review them, then apply them "
+            "from the root of your git repository with git apply; when this application is a "
+            "folder inside a bigger repository, add --directory=<that folder>.\n",
             encoding="utf-8",
         )
         run = {
