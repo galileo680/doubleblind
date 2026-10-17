@@ -223,7 +223,9 @@ def messages(
         parts.insert(
             0,
             f"{SCOPE}{context['scope']}\nThe contract implements exactly this scope: no "
-            "operations, webhooks, decisions or scenarios for anything outside it.",
+            "operations, webhooks, decisions or scenarios for anything outside it. If your "
+            "system does not support part of this scope, ask your human about it in your first "
+            "turn instead of leaving it out silently.",
         )
     if context.get("api_from_spec"):
         parts.insert(
