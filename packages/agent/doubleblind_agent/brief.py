@@ -1,5 +1,6 @@
 from doubleblind_agent.models import Brief, Psm
 from doubleblind_agent.prompts import BRIEF_WRITER
+from doubleblind_agent.psm import SCOPE
 from doubleblind_llm import LLMClient, LLMRequest, Role
 
 
@@ -10,6 +11,7 @@ async def write_brief(
     role: str,
     synthetic: dict[str, list[str]],
     feedback: list[str],
+    scope: str | None,
 ) -> Brief:
     allowed = ", ".join([*synthetic["phones"], *synthetic["emails"]])
     messages = [
@@ -21,6 +23,13 @@ async def write_brief(
             f"synthetic values: {allowed}.",
         },
     ]
+    if scope:
+        messages.append(
+            {
+                "role": "user",
+                "content": f"{SCOPE}{scope}\nWrite the brief only for what this scope needs.",
+            }
+        )
     if feedback:
         rejected = "\n".join(f"- {reason}" for reason in feedback)
         messages.append(
@@ -39,4 +48,5 @@ async def write_brief(
         )
     )
     brief = Brief.model_validate(response.parsed)
-    return brief.model_copy(update={"party": party, "role": role})
+    update = {"party": party, "role": role, **({"goal": scope} if scope else {})}
+    return brief.model_copy(update=update)

@@ -33,6 +33,7 @@ export function SignInFirst({ next }: { next: string }) {
 function NewIntegration() {
   const [name, setName] = useState("");
   const [role, setRole] = useState<Role>("provider");
+  const [scope, setScope] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +42,7 @@ function NewIntegration() {
     setBusy(true);
     setError(null);
     try {
-      navigate(integrationPath((await api.createIntegration(name.trim(), role)).id));
+      navigate(integrationPath((await api.createIntegration(name.trim(), role, scope.trim())).id));
     } catch (failure) {
       setError(errorText(failure));
       setBusy(false);
@@ -76,10 +77,30 @@ function NewIntegration() {
           ]}
         />
       </div>
+      <label className="field">
+        What should the integration do?
+        <textarea
+          className="input"
+          rows={3}
+          value={scope}
+          onChange={(event) => setScope(event.target.value)}
+          placeholder="When an order is paid, Spokes creates a shipment at Parcelly; Parcelly sends every status change back by webhook."
+          minLength={10}
+          maxLength={2000}
+          required
+        />
+        <span className="muted">
+          Your partner accepts or changes it; the agents build exactly this scope.
+        </span>
+      </label>
       {error && <div className="alert alert-error">{error}</div>}
       <div className="row">
         <span className="grow" />
-        <button className="btn btn-primary" type="submit" disabled={busy || !name.trim()}>
+        <button
+          className="btn btn-primary"
+          type="submit"
+          disabled={busy || !name.trim() || scope.trim().length < 10}
+        >
           {busy && <span className="spinner" />}
           Create integration
         </button>

@@ -618,6 +618,7 @@ class BrokerService:
             "name": record.name,
             "recorded": link is not None and link.recorded,
             "you": principal.party_key,
+            "scope": self.preset(record.preset).scope,
             "preset": record.preset,
             "state": record.state,
             "round": record.round,
@@ -675,13 +676,17 @@ class BrokerService:
             record = self.session_record(db, session_id)
             party = self.party(db, session_id, party_key)
             state = State(record.state)
+            preset = self.preset(record.preset)
             if state in TERMINAL_STATES:
                 return {"action": "done", "context": {"state": state.value}}
             if state is State.BRIEFING and party.brief_json is None:
-                allowlist = self.preset(record.preset).synthetic_allowlist.model_dump()
                 return {
                     "action": "build_psm_and_brief",
-                    "context": {"role": party.role, "synthetic_allowlist": allowlist},
+                    "context": {
+                        "role": party.role,
+                        "synthetic_allowlist": preset.synthetic_allowlist.model_dump(),
+                        "scope": preset.scope,
+                    },
                 }
             if (
                 state in NEGOTIATION_STATES
@@ -692,6 +697,7 @@ class BrokerService:
                     "role": party.role,
                     "round": record.round + 1,
                     "based_on_version": record.current_contract_version,
+                    "scope": preset.scope,
                 }
                 if state is State.AMENDING:
                     gaps = [
@@ -706,9 +712,8 @@ class BrokerService:
                     "role": party.role,
                     "signed_version": record.signed_contract_version,
                     "secrets": json.loads(record.secrets_json),
-                    "synthetic_allowlist": self.preset(
-                        record.preset
-                    ).synthetic_allowlist.model_dump(),
+                    "synthetic_allowlist": preset.synthetic_allowlist.model_dump(),
+                    "scope": preset.scope,
                 }
                 if record.e2e_feedback_json is not None:
                     context["sanitized_e2e"] = json.loads(record.e2e_feedback_json)

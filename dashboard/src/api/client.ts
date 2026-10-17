@@ -65,11 +65,23 @@ export const api = {
   logout: () => request<unknown>("/auth/logout", null, { method: "POST" }),
   integrations: () => request<Integration[]>("/integrations", null),
   integration: (id: string) => request<Integration>(integration(id), null),
-  createIntegration: (name: string, role: Role) =>
+  createIntegration: (name: string, role: Role, scope: string) =>
     request<Integration>("/integrations", null, {
       method: "POST",
-      body: JSON.stringify({ name, role }),
+      body: JSON.stringify({ name, role, scope }),
     }),
+  proposeScope: (id: string, text: string) =>
+    request<Integration>(`${integration(id)}/scope`, null, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  acceptScope: (id: string, version: number) =>
+    request<Integration>(`${integration(id)}/scope/accept`, null, {
+      method: "POST",
+      body: JSON.stringify({ version }),
+    }),
+  declineScope: (id: string) =>
+    request<Integration>(`${integration(id)}/scope/decline`, null, { method: "POST" }),
   newInvite: (id: string) =>
     request<Integration & { invite_token: string }>(`${integration(id)}/invite`, null, {
       method: "POST",

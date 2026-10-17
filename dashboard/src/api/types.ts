@@ -49,6 +49,7 @@ export interface SessionView {
   name: string;
   recorded: boolean;
   you: string | null;
+  scope: string | null;
   preset: string;
   state: SessionState;
   round: number;
@@ -148,6 +149,22 @@ export interface Account {
   company: string;
 }
 
+export interface ScopeEvent {
+  version: number;
+  action: "proposed" | "accepted" | "declined";
+  role: Role;
+  at: string;
+  text?: string;
+}
+
+export interface Scope {
+  text: string;
+  version: number;
+  proposed_by: Role;
+  status: "proposed" | "agreed" | "declined";
+  history: ScopeEvent[];
+}
+
 export interface AgentStatus {
   online: boolean;
   repo?: string | null;
@@ -168,6 +185,7 @@ export interface Integration {
   your_role: Role;
   companies: Record<Role, string | null>;
   invite_expires_at: number | null;
+  scope: Scope;
   agent_key_issued: boolean;
   agents: Partial<Record<Role, AgentStatus>>;
   sessions: IntegrationRun[];
@@ -175,6 +193,7 @@ export interface Integration {
 
 export interface InvitePreview {
   name: string;
+  scope: string;
   invited_by: string | null;
   your_role: Role;
   expires_at: number;

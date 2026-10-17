@@ -39,6 +39,7 @@ class Preset(PresetModel):
     synthetic_allowlist: AllowlistSpec = Field(default_factory=AllowlistSpec)
     autopilot_answers: list[AutopilotAnswer] = Field(default_factory=list)
     personas: Personas = Field(default_factory=Personas)
+    scope: str | None = None
 
     def allowlist(self) -> SyntheticAllowlist:
         return SyntheticAllowlist.build(

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, errorText } from "../api/client";
-import type { Integration } from "../api/types";
+import type { Integration, Role } from "../api/types";
 import { CopyButton } from "../components/session/Header";
 import { Badge, Card, CardHead, Segmented, Spinner, StateBadge } from "../components/ui";
 import { dateTime } from "../lib/format";
@@ -21,6 +21,112 @@ function Secret({ text, note }: { text: string; note: string }) {
       </div>
       <span className="muted">{note}</span>
     </>
+  );
+}
+
+function ScopeStep({
+  integration,
+  act,
+  onChange,
+}: {
+  integration: Integration;
+  act: (action: () => Promise<void>) => Promise<void>;
+  onChange: (next: Integration) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const { scope, companies, your_role: mine } = integration;
+  const partner = companies[otherRole(mine)];
+  const company = (role: Role) => companies[role] ?? role;
+  const answering = scope.status === "proposed" && scope.proposed_by !== mine && partner;
+  const badge =
+    scope.status === "agreed" ? (
+      <Badge tone="o">Agreed</Badge>
+    ) : scope.status === "declined" ? (
+      <Badge tone="e">Declined</Badge>
+    ) : answering ? (
+      <Badge tone="w">Your answer needed</Badge>
+    ) : (
+      <Badge tone="w">Waiting for {partner ?? "your partner"}</Badge>
+    );
+  const send = (change: () => Promise<Integration>) =>
+    act(async () => {
+      onChange(await change());
+      setDraft(null);
+    });
+
+  return (
+    <Card testId="scope-step">
+      <CardHead title="2 · Agree on the scope">{badge}</CardHead>
+      <div className="form-card" style={{ border: 0 }}>
+        <span className="fg2">
+          What the integration must do. Both companies accept the same version before the agents
+          start, and the agents build exactly this.
+        </span>
+        <blockquote className="scope-text">{scope.text}</blockquote>
+        <span className="muted">
+          Version {scope.version} · proposed by {company(scope.proposed_by)}
+          {scope.status === "agreed" && ` · accepted by ${company(otherRole(scope.proposed_by))}`}
+          {scope.status === "declined" && ` · declined by ${company(otherRole(scope.proposed_by))}`}
+        </span>
+        {draft === null ? (
+          <div className="row wrap">
+            {answering && (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => send(() => api.acceptScope(integration.id, scope.version))}
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => send(() => api.declineScope(integration.id))}
+                >
+                  Decline
+                </button>
+              </>
+            )}
+            <button type="button" className="btn" onClick={() => setDraft(scope.text)}>
+              Propose changes
+            </button>
+          </div>
+        ) : (
+          <>
+            <textarea
+              className="input"
+              rows={3}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              maxLength={2000}
+            />
+            <div className="row">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={draft.trim().length < 10}
+                onClick={() => send(() => api.proposeScope(integration.id, draft.trim()))}
+              >
+                Send proposal
+              </button>
+              <button type="button" className="btn" onClick={() => setDraft(null)}>
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+        {scope.history.length > 1 && (
+          <div className="stack" style={{ gap: 2 }}>
+            {scope.history.map((entry) => (
+              <span key={`${entry.version}-${entry.action}-${entry.at}`} className="muted">
+                v{entry.version} {entry.action} by {company(entry.role)} · {dateTime(entry.at)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -69,8 +175,14 @@ export function IntegrationPage({ id }: { id: string }) {
   const running = integration.sessions.some(
     (run) => !run.recorded && run.state !== "CERTIFIED" && run.state !== "FAILED",
   );
-  const blocker = !partner
+  const agreed = integration.scope.status === "agreed";
+  const demoBlocker = !partner
     ? "Your partner has to join first."
+    : !agreed
+      ? "Both companies must accept the scope first."
+      : null;
+  const blocker = demoBlocker
+    ? demoBlocker
     : !mine?.online || !theirs?.online
       ? "Both agents must be online."
       : running
@@ -138,8 +250,10 @@ export function IntegrationPage({ id }: { id: string }) {
         </div>
       </Card>
 
+      <ScopeStep integration={integration} act={act} onChange={setIntegration} />
+
       <Card testId="agent-step">
-        <CardHead title="2 · Connect your agent">
+        <CardHead title="3 · Connect your agent">
           {mine?.online ? (
             <Badge tone="o">Agent online</Badge>
           ) : integration.agent_key_issued ? (
@@ -203,7 +317,7 @@ export function IntegrationPage({ id }: { id: string }) {
       </Card>
 
       <Card testId="run-step">
-        <CardHead title="3 · Run the integration" />
+        <CardHead title="4 · Run the integration" />
         <div className="form-card" style={{ border: 0 }}>
           <span className="fg2">
             Start runs the real integration: both agents negotiate the contract, ask your people,
@@ -244,8 +358,8 @@ export function IntegrationPage({ id }: { id: string }) {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={!partner}
-              title={partner ? undefined : "Your partner has to join first"}
+              disabled={demoBlocker !== null}
+              title={demoBlocker ?? undefined}
               onClick={() =>
                 act(async () =>
                   navigate(sessionPath((await api.startDemo(id, Number(speed))).session_id)),

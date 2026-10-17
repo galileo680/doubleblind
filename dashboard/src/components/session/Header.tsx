@@ -148,6 +148,11 @@ export function SessionHeader() {
               <span className="role">provides</span>
             </div>
           )}
+          {session?.scope && (
+            <div className="muted" data-testid="session-scope">
+              Scope: {session.scope}
+            </div>
+          )}
         </div>
         <div className="row wrap">
           <CodeShared lines={metrics?.code_lines_shared ?? 0} />

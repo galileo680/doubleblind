@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from doubleblind_agent.broker_client import BrokerClient
 from doubleblind_agent.models import Patch, Psm, TavilyTurn, Turn
 from doubleblind_agent.prompts import AMEND, CONTRACT_GUIDE, NEGOTIATOR, PHASES, TAVILY_RULE
+from doubleblind_agent.psm import SCOPE
 from doubleblind_agent.standards import enabled
 from doubleblind_contract.loader import parse_yaml
 from doubleblind_contract.validate import (
@@ -218,6 +219,12 @@ def messages(
         "Phone numbers and e-mail addresses in examples may only be these synthetic values: "
         + ", ".join([*synthetic["phones"], *synthetic["emails"]]),
     ]
+    if context.get("scope"):
+        parts.insert(
+            0,
+            f"{SCOPE}{context['scope']}\nThe contract implements exactly this scope: no "
+            "operations, webhooks, decisions or scenarios for anything outside it.",
+        )
     if context.get("api_from_spec"):
         parts.insert(
             2,

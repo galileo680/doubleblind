@@ -47,6 +47,19 @@ class CreateIntegrationIn(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     role: Literal["consumer", "provider"]
+    scope: str = Field(min_length=10, max_length=2000)
+
+
+class ScopeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=10, max_length=2000)
+
+
+class AcceptScopeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: int = Field(ge=1)
 
 
 class DemoIn(BaseModel):
@@ -311,7 +324,7 @@ def build_account_router(accounts: Accounts, integrations: Integrations) -> APIR
 
     @router.post("/integrations", status_code=201)
     def create_integration(body: CreateIntegrationIn, member: Member) -> dict[str, Any]:
-        return integrations.create(member, body.name, body.role)
+        return integrations.create(member, body.name, body.role, body.scope)
 
     @router.get("/integrations")
     def list_integrations(member: Member) -> list[dict[str, Any]]:
@@ -324,6 +337,18 @@ def build_account_router(accounts: Accounts, integrations: Integrations) -> APIR
     @router.post("/integrations/{integration_id}/invite")
     def renew_invite(integration_id: str, member: Member) -> dict[str, Any]:
         return integrations.renew_invite(member, integration_id)
+
+    @router.post("/integrations/{integration_id}/scope")
+    def propose_scope(integration_id: str, body: ScopeIn, member: Member) -> dict[str, Any]:
+        return integrations.change_scope(member, integration_id, "proposed", text=body.text)
+
+    @router.post("/integrations/{integration_id}/scope/accept")
+    def accept_scope(integration_id: str, body: AcceptScopeIn, member: Member) -> dict[str, Any]:
+        return integrations.change_scope(member, integration_id, "accepted", version=body.version)
+
+    @router.post("/integrations/{integration_id}/scope/decline")
+    def decline_scope(integration_id: str, member: Member) -> dict[str, Any]:
+        return integrations.change_scope(member, integration_id, "declined")
 
     @router.post("/integrations/{integration_id}/agent-key")
     def issue_agent_key(integration_id: str, member: Member) -> dict[str, str]:

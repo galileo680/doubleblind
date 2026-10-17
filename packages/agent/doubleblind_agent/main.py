@@ -151,7 +151,7 @@ class PartyRuntime:
         finally:
             await sandbox.aclose()
         await self.report_sandbox_cost(broker, sandbox)
-        psm = await build_psm(self.llm, repo, role, party)
+        psm = await build_psm(self.llm, repo, role, party, context.get("scope"))
         self.save("psm.json", psm.model_dump())
         spec = next((item for item in repo.files if item["path"] in SPEC_FILES), None)
         self.save("api.json", contract_sections(parse_yaml(spec["content"])) if spec else None)
@@ -182,7 +182,9 @@ class PartyRuntime:
         async def brief(feedback: list[str]) -> dict[str, Any]:
             synthetic = context["synthetic_allowlist"]
             written = (
-                await write_brief(self.llm, psm, party, role, synthetic, feedback)
+                await write_brief(
+                    self.llm, psm, party, role, synthetic, feedback, context.get("scope")
+                )
             ).model_dump()
             self.save("brief.json", written)
             return written
@@ -208,6 +210,7 @@ class PartyRuntime:
             situation = {
                 **await negotiation_context(broker),
                 "gap": context.get("gap"),
+                "scope": context.get("scope"),
                 "standards": list(self.standards),
                 "api_from_spec": bool(api),
             }

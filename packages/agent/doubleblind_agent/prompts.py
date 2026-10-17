@@ -4,6 +4,7 @@ Be exhaustive about: data entities and field semantics (units, formats, free-tex
 exposed APIs and their error codes, business rules (especially those only in internal docs — mark public=false),
 data quirks seen in seed data or docs, extension points where an integration should be hooked,
 and how to run the app and its tests. Do not invent anything not supported by the files.
+When an integration scope is given, model in depth everything that scope touches and keep the rest brief.
 This model never leaves the company; include file paths where useful."""
 
 BRIEF_WRITER = """You represent {party} ({role}) in an integration with another company. Using the private system model,

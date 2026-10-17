@@ -2,6 +2,9 @@ name: spokes-parcelly
 contract_id: spokes-parcelly-shipping
 consumer: { party: spokes, display_name: "Spokes (bike shop)", workspace: demo/spokes }
 provider: { party: parcelly, display_name: "Parcelly (courier)", workspace: demo/parcelly }
+scope: >-
+  When an order is paid, Spokes creates a shipment at Parcelly; Parcelly sends every
+  shipment status change back to Spokes by webhook, so the order shows the delivery status.
 synthetic_allowlist:
   phones:
     - "07700 900200"

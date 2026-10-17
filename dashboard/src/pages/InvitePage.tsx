@@ -39,6 +39,13 @@ export function InvitePage({ token }: { token: string }) {
               <b>{invite.invited_by}</b> invites your company to build the integration{" "}
               <b>{invite.name}</b>. Your side: <b>{ROLE_TEXT[invite.your_role]}</b>.
             </span>
+            <div className="field">
+              Proposed scope
+              <blockquote className="scope-text">{invite.scope}</blockquote>
+              <span className="muted">
+                After joining you can accept it, propose changes or decline it.
+              </span>
+            </div>
             <span className="muted">
               Valid until {new Date(invite.expires_at * 1000).toLocaleString()}. The link works
               once.

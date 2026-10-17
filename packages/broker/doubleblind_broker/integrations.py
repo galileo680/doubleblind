@@ -41,6 +41,19 @@ def online(member: MemberRecord) -> bool:
     return member.agent_seen_at is not None and time.time() - member.agent_seen_at < ONLINE_S
 
 
+def record_scope(integration: IntegrationRecord, role: str, action: str) -> None:
+    entry: dict[str, Any] = {
+        "version": integration.scope_version,
+        "action": action,
+        "role": role,
+        "at": utc_now(),
+    }
+    if action == "proposed":
+        entry["text"] = integration.scope
+    history = json.loads(integration.scope_history_json)
+    integration.scope_history_json = json.dumps([*history, entry], ensure_ascii=False)
+
+
 class Integrations:
     def __init__(self, service: BrokerService) -> None:
         self.service = service
@@ -86,6 +99,13 @@ class Integrations:
             "your_role": mine.role,
             "companies": companies,
             "invite_expires_at": integration.invite_expires_at,
+            "scope": {
+                "text": integration.scope,
+                "version": integration.scope_version,
+                "proposed_by": integration.scope_by,
+                "status": integration.scope_status,
+                "history": json.loads(integration.scope_history_json),
+            },
             "agent_key_issued": mine.agent_key_hash is not None,
             "agents": {
                 role: {
@@ -114,10 +134,15 @@ class Integrations:
             ),
         }
 
-    def create(self, account_id: str, name: str, role: str) -> dict[str, Any]:
+    def create(self, account_id: str, name: str, role: str, scope: str) -> dict[str, Any]:
         integration = IntegrationRecord(
-            id=f"int_{secrets.token_hex(6)}", name=name.strip(), created_at=utc_now()
+            id=f"int_{secrets.token_hex(6)}",
+            name=name.strip(),
+            created_at=utc_now(),
+            scope=scope.strip(),
+            scope_by=role,
         )
+        record_scope(integration, role, "proposed")
         with open_session(self.engine) as db:
             db.add(integration)
             db.add(MemberRecord(integration_id=integration.id, role=role, account_id=account_id))
@@ -178,6 +203,7 @@ class Integrations:
             account = db.get(AccountRecord, inviter.account_id)
             return {
                 "name": integration.name,
+                "scope": integration.scope,
                 "invited_by": account.company if account else None,
                 "your_role": other_role(inviter.role),
                 "expires_at": integration.invite_expires_at,
@@ -222,11 +248,47 @@ class Integrations:
             db.add(member)
             db.commit()
 
+    def change_scope(
+        self, account_id: str, integration_id: str, action: str, text: str = "", version: int = 0
+    ) -> dict[str, Any]:
+        with open_session(self.engine) as db:
+            integration, member = self.membership(db, integration_id, account_id)
+            if action == "proposed":
+                integration.scope = text.strip()
+                integration.scope_version += 1
+                integration.scope_by = member.role
+                integration.scope_status = "proposed"
+            else:
+                if len(self.members(db, integration_id)) < len(ROLES):
+                    raise BrokerError(409, "PARTNER_MISSING", "Your partner has not joined yet.")
+                if member.role == integration.scope_by:
+                    raise BrokerError(
+                        409, "OWN_PROPOSAL", "The other company answers your proposal."
+                    )
+                if integration.scope_status != "proposed":
+                    raise BrokerError(409, "SCOPE_CLOSED", "There is no open scope proposal.")
+                if action == "accepted" and version != integration.scope_version:
+                    raise BrokerError(
+                        409, "SCOPE_CHANGED", "The scope changed meanwhile. Read the new version."
+                    )
+                integration.scope_status = "agreed" if action == "accepted" else "declined"
+            record_scope(integration, member.role, action)
+            db.add(integration)
+            db.commit()
+            return self.view(db, integration, account_id)
+
+    def require_scope(self, integration: IntegrationRecord) -> None:
+        if integration.scope_status != "agreed":
+            raise BrokerError(
+                409, "SCOPE_NOT_AGREED", "Both companies must accept the scope first."
+            )
+
     def start_demo(self, account_id: str, integration_id: str, speed: int) -> dict[str, str]:
         with open_session(self.engine) as db:
-            self.membership(db, integration_id, account_id)
+            integration, _ = self.membership(db, integration_id, account_id)
             if len(self.members(db, integration_id)) < len(ROLES):
                 raise BrokerError(409, "PARTNER_MISSING", "Your partner has not joined yet.")
+            self.require_scope(integration)
             session_id = add_recorded_run(db, speed)
             db.add(
                 IntegrationSessionRecord(
@@ -253,6 +315,7 @@ class Integrations:
             contract_id=slug(integration.name) or "integration",
             consumer=parties["consumer"],
             provider=parties["provider"],
+            scope=integration.scope,
             synthetic_allowlist=AllowlistSpec(
                 phones=list(dict.fromkeys(item for data in declared for item in data["phones"])),
                 emails=list(dict.fromkeys(item for data in declared for item in data["emails"])),
@@ -282,6 +345,7 @@ class Integrations:
             members = self.members(db, integration_id)
             if len(members) < len(ROLES):
                 raise BrokerError(409, "PARTNER_MISSING", "Your partner has not joined yet.")
+            self.require_scope(integration)
             if not all(online(member) for member in members.values()):
                 raise BrokerError(
                     409,
@@ -303,6 +367,16 @@ class Integrations:
                 )
             )
             db.commit()
+        self.service.events.append(
+            created["session_id"],
+            "scope.agreed",
+            "broker",
+            {
+                "scope": integration.scope,
+                "version": integration.scope_version,
+                "proposed_by": integration.scope_by,
+            },
+        )
         self.service.start(admin, created["session_id"])
         return {"session_id": created["session_id"]}
 

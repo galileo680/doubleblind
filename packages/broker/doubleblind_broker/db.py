@@ -167,6 +167,11 @@ class IntegrationRecord(SQLModel, table=True):
     created_at: str
     invite_token_hash: str | None = Field(default=None, index=True)
     invite_expires_at: int | None = None
+    scope: str = ""
+    scope_version: int = 1
+    scope_by: str = ""
+    scope_status: str = "proposed"
+    scope_history_json: str = "[]"
 
 
 class MemberRecord(SQLModel, table=True):
