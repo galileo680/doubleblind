@@ -1,0 +1,9 @@
+install: |
+  python /opt/doubleblind/install_node.py 24
+  npm ci --no-audit --no-fund --loglevel=error
+  printf 'node_modules\n' > .gitignore
+synthetic_test_data:
+  phones:
+    - "+447700900200"
+    - "+447700900300"
+  emails: []

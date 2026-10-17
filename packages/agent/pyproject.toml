@@ -19,3 +19,6 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["doubleblind_agent"]
+
+[project.scripts]
+doubleblind = "doubleblind_agent.connect:main"

@@ -176,6 +176,17 @@ class MemberRecord(SQLModel, table=True):
     role: str = Field(primary_key=True)
     account_id: str = Field(index=True)
     agent_key_hash: str | None = Field(default=None, index=True)
+    agent_seen_at: float | None = None
+    agent_repo: str | None = None
+    agent_commit: str | None = None
+    synthetic_json: str = "{}"
+
+
+class PresetRecord(SQLModel, table=True):
+    __tablename__ = "presets"
+
+    name: str = Field(primary_key=True)
+    preset_json: str
 
 
 class IntegrationSessionRecord(SQLModel, table=True):

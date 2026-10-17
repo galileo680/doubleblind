@@ -11,6 +11,7 @@ htmlcov/
 node_modules/
 dist/
 volumes/
+.doubleblind/
 *.db
 *.sqlite3
 .DS_Store

@@ -10,9 +10,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from doubleblind_broker.accounts import LOGIN_TTL_S, Accounts
 from doubleblind_broker.certificate import render_certificate
-from doubleblind_broker.integrations import Integrations
+from doubleblind_broker.integrations import AGENT_KEY_PREFIX, Integrations
 from doubleblind_broker.service import (
     AgentEventIn,
+    BrokerError,
     BrokerService,
     ContractGapIn,
     TestRunIn,
@@ -52,6 +53,21 @@ class DemoIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     speed: int = Field(ge=1, le=60)
+
+
+class SyntheticIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phones: list[str] = Field(default_factory=list)
+    emails: list[str] = Field(default_factory=list)
+
+
+class AgentHelloIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repo: str = Field(max_length=200)
+    commit: str = Field(max_length=64)
+    synthetic_test_data: SyntheticIn = Field(default_factory=SyntheticIn)
 
 
 class CreateSessionIn(BaseModel):
@@ -98,6 +114,8 @@ def build_router(
     ) -> Principal:
         supplied = bearer(authorization) or token
         session_id = request.path_params.get("session_id")
+        if supplied and supplied.startswith(AGENT_KEY_PREFIX) and session_id:
+            return integrations.agent_principal(supplied, session_id)
         if supplied or login is None or session_id is None:
             return service.resolve(supplied)
         return integrations.session_principal(accounts.account(login)["id"], session_id)
@@ -297,7 +315,7 @@ def build_account_router(accounts: Accounts, integrations: Integrations) -> APIR
 
     @router.get("/integrations")
     def list_integrations(member: Member) -> list[dict[str, Any]]:
-        return integrations.list(member)
+        return integrations.for_account(member)
 
     @router.get("/integrations/{integration_id}")
     def integration(integration_id: str, member: Member) -> dict[str, Any]:
@@ -319,6 +337,33 @@ def build_account_router(accounts: Accounts, integrations: Integrations) -> APIR
     @router.post("/integrations/{integration_id}/demo", status_code=201)
     def start_demo(integration_id: str, body: DemoIn, member: Member) -> dict[str, str]:
         return integrations.start_demo(member, integration_id, body.speed)
+
+    @router.post("/integrations/{integration_id}/start", status_code=201)
+    def start_live(integration_id: str, member: Member) -> dict[str, str]:
+        return integrations.start_live(member, integration_id)
+
+    @router.post("/integrations/{integration_id}/stop", status_code=204)
+    def stop_live(integration_id: str, member: Member) -> Response:
+        integrations.stop_live(member, integration_id)
+        return Response(status_code=204)
+
+    def agent_key(authorization: Annotated[str | None, Header()] = None) -> str:
+        key = bearer(authorization)
+        if not key or not key.startswith(AGENT_KEY_PREFIX):
+            raise BrokerError(401, "UNAUTHORIZED", "This needs an agent key.")
+        return key
+
+    AgentKey = Annotated[str, Depends(agent_key)]
+
+    @router.post("/agent/hello")
+    def agent_hello(body: AgentHelloIn, key: AgentKey) -> dict[str, str]:
+        return integrations.agent_hello(
+            key, body.repo, body.commit, body.synthetic_test_data.model_dump()
+        )
+
+    @router.get("/agent/session", response_model=None)
+    def agent_session(key: AgentKey) -> dict[str, str] | Response:
+        return integrations.agent_session(key) or Response(status_code=204)
 
     @router.get("/invites/{token}")
     def invite(token: str) -> dict[str, Any]:

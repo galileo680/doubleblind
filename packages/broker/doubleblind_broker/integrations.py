@@ -1,9 +1,10 @@
+import json
+import re
 import secrets
 import time
 from typing import Any
 
-from sqlalchemy import Engine
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from doubleblind_broker.db import (
     AccountRecord,
@@ -11,15 +12,20 @@ from doubleblind_broker.db import (
     IntegrationSessionRecord,
     MemberRecord,
     PartyRecord,
+    PresetRecord,
     SessionRecord,
     open_session,
 )
 from doubleblind_broker.events import utc_now
+from doubleblind_broker.presets import AllowlistSpec, Preset, PresetParty
 from doubleblind_broker.recording import add_recorded_run
-from doubleblind_broker.service import BrokerError
+from doubleblind_broker.service import BrokerError, BrokerService
+from doubleblind_broker.state_machine import TERMINAL_STATES, State
 from doubleblind_broker.tokens import Principal, hash_token, new_token
 
 INVITE_TTL_S = 7 * 24 * 3600
+ONLINE_S = 30
+AGENT_KEY_PREFIX = "dbk_"
 ROLES = ("consumer", "provider")
 
 
@@ -27,9 +33,18 @@ def other_role(role: str) -> str:
     return "provider" if role == "consumer" else "consumer"
 
 
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def online(member: MemberRecord) -> bool:
+    return member.agent_seen_at is not None and time.time() - member.agent_seen_at < ONLINE_S
+
+
 class Integrations:
-    def __init__(self, engine: Engine) -> None:
-        self.engine = engine
+    def __init__(self, service: BrokerService) -> None:
+        self.service = service
+        self.engine = service.engine
 
     def members(self, db: Session, integration_id: str) -> dict[str, MemberRecord]:
         rows = db.exec(select(MemberRecord).where(MemberRecord.integration_id == integration_id))
@@ -72,6 +87,17 @@ class Integrations:
             "companies": companies,
             "invite_expires_at": integration.invite_expires_at,
             "agent_key_issued": mine.agent_key_hash is not None,
+            "agents": {
+                role: {
+                    "online": online(member),
+                    **(
+                        {"repo": member.agent_repo, "commit": member.agent_commit}
+                        if member is mine
+                        else {}
+                    ),
+                }
+                for role, member in members.items()
+            },
             "sessions": sorted(
                 (
                     {
@@ -98,7 +124,7 @@ class Integrations:
             db.commit()
             return self.view(db, integration, account_id)
 
-    def list(self, account_id: str) -> list[dict[str, Any]]:
+    def for_account(self, account_id: str) -> list[dict[str, Any]]:
         with open_session(self.engine) as db:
             rows = db.exec(select(MemberRecord).where(MemberRecord.account_id == account_id))
             integrations = [db.get(IntegrationRecord, row.integration_id) for row in rows]
@@ -181,7 +207,7 @@ class Integrations:
             return self.view(db, integration, account_id)
 
     def issue_agent_key(self, account_id: str, integration_id: str) -> dict[str, str]:
-        key = f"dbk_{new_token()}"
+        key = f"{AGENT_KEY_PREFIX}{new_token()}"
         with open_session(self.engine) as db:
             _, member = self.membership(db, integration_id, account_id)
             member.agent_key_hash = hash_token(key)
@@ -210,6 +236,135 @@ class Integrations:
             db.commit()
         return {"session_id": session_id}
 
+    def live_preset(
+        self, db: Session, integration: IntegrationRecord, members: dict[str, MemberRecord]
+    ) -> Preset:
+        parties: dict[str, PresetParty] = {}
+        declared = [json.loads(member.synthetic_json) for member in members.values()]
+        for role, member in members.items():
+            account = db.get(AccountRecord, member.account_id)
+            company = account.company if account else role
+            key = slug(company)
+            if not key[:1].isalpha() or key in {party.party for party in parties.values()}:
+                key = f"{role}-{key}".strip("-")
+            parties[role] = PresetParty(party=key, display_name=company)
+        return Preset(
+            name=f"live-{secrets.token_hex(6)}",
+            contract_id=slug(integration.name) or "integration",
+            consumer=parties["consumer"],
+            provider=parties["provider"],
+            synthetic_allowlist=AllowlistSpec(
+                phones=list(dict.fromkeys(item for data in declared for item in data["phones"])),
+                emails=list(dict.fromkeys(item for data in declared for item in data["emails"])),
+            ),
+        )
+
+    def live_session(self, db: Session, integration_id: str) -> SessionRecord | None:
+        links = db.exec(
+            select(IntegrationSessionRecord).where(
+                IntegrationSessionRecord.integration_id == integration_id,
+                col(IntegrationSessionRecord.recorded).is_(False),
+            )
+        )
+        sessions = [db.get(SessionRecord, link.session_id) for link in links]
+        return next(
+            (
+                session
+                for session in sessions
+                if session is not None and State(session.state) not in TERMINAL_STATES
+            ),
+            None,
+        )
+
+    def start_live(self, account_id: str, integration_id: str) -> dict[str, str]:
+        with open_session(self.engine) as db:
+            integration, _ = self.membership(db, integration_id, account_id)
+            members = self.members(db, integration_id)
+            if len(members) < len(ROLES):
+                raise BrokerError(409, "PARTNER_MISSING", "Your partner has not joined yet.")
+            if not all(online(member) for member in members.values()):
+                raise BrokerError(
+                    409,
+                    "AGENTS_OFFLINE",
+                    "Both agents must be online. Each company starts its own with doubleblind "
+                    "connect.",
+                )
+            if self.live_session(db, integration_id) is not None:
+                raise BrokerError(409, "RUN_IN_PROGRESS", "A live run is already in progress.")
+            preset = self.live_preset(db, integration, members)
+            db.add(PresetRecord(name=preset.name, preset_json=preset.model_dump_json()))
+            db.commit()
+        admin = Principal("admin")
+        created = self.service.create_session(admin, integration.name, preset.name)
+        with open_session(self.engine) as db:
+            db.add(
+                IntegrationSessionRecord(
+                    session_id=created["session_id"], integration_id=integration_id
+                )
+            )
+            db.commit()
+        self.service.start(admin, created["session_id"])
+        return {"session_id": created["session_id"]}
+
+    def stop_live(self, account_id: str, integration_id: str) -> None:
+        with open_session(self.engine) as db:
+            _, member = self.membership(db, integration_id, account_id)
+            session = self.live_session(db, integration_id)
+            party = self.party(db, session.id, member.role) if session else None
+        if session is None or party is None:
+            raise BrokerError(409, "NO_RUN", "No live run is in progress.")
+        self.service.cancel(session.id, Principal("human", session.id, party.party_key).actor)
+
+    def agent(self, db: Session, key: str) -> MemberRecord:
+        member = db.exec(
+            select(MemberRecord).where(MemberRecord.agent_key_hash == hash_token(key))
+        ).first()
+        if member is None:
+            raise BrokerError(401, "UNKNOWN_AGENT_KEY", "This agent key is not valid any more.")
+        member.agent_seen_at = time.time()
+        db.add(member)
+        db.commit()
+        return member
+
+    def agent_hello(
+        self, key: str, repo: str, commit: str, synthetic: dict[str, list[str]]
+    ) -> dict[str, str]:
+        with open_session(self.engine) as db:
+            member = self.agent(db, key)
+            member.agent_repo, member.agent_commit = repo, commit
+            member.synthetic_json = json.dumps(synthetic)
+            db.add(member)
+            db.commit()
+            integration = db.get(IntegrationRecord, member.integration_id)
+            return {"integration": integration.name if integration else "", "role": member.role}
+
+    def agent_session(self, key: str) -> dict[str, str] | None:
+        with open_session(self.engine) as db:
+            member = self.agent(db, key)
+            session = self.live_session(db, member.integration_id)
+            party = self.party(db, session.id, member.role) if session else None
+        if session is None or party is None:
+            return None
+        return {"session_id": session.id, "party": party.party_key}
+
+    def party(self, db: Session, session_id: str, role: str | None) -> PartyRecord | None:
+        return db.exec(
+            select(PartyRecord).where(
+                PartyRecord.session_id == session_id, PartyRecord.role == role
+            )
+        ).first()
+
+    def agent_principal(self, key: str, session_id: str) -> Principal:
+        with open_session(self.engine) as db:
+            member = self.agent(db, key)
+            link = db.get(IntegrationSessionRecord, session_id)
+            party = None
+            if link and not link.recorded and link.integration_id == member.integration_id:
+                party = self.party(db, session_id, member.role)
+        if party is None:
+            raise BrokerError(403, "FORBIDDEN", "This agent key cannot act in this session.")
+        return Principal("agent", session_id, party.party_key)
+
     def session_principal(self, account_id: str, session_id: str) -> Principal:
         with open_session(self.engine) as db:
             link = db.get(IntegrationSessionRecord, session_id)
@@ -217,11 +372,7 @@ class Integrations:
             role = next(
                 (role for role, member in members.items() if member.account_id == account_id), None
             )
-            party = db.exec(
-                select(PartyRecord).where(
-                    PartyRecord.session_id == session_id, PartyRecord.role == role
-                )
-            ).first()
+            party = self.party(db, session_id, role)
         if party is None:
             raise BrokerError(403, "FORBIDDEN", "Your company does not take part in this session.")
         return Principal("human", session_id, party.party_key)

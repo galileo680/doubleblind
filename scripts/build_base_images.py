@@ -1,52 +1,16 @@
 import argparse
 import asyncio
 import json
-import subprocess
-import sys
-import tempfile
 from pathlib import Path
 
 from doubleblind_llm.settings import load_dotenv
 from doubleblind_sandbox.docker import docker_available
 from doubleblind_sandbox.environment import BASE_IMAGES_FILES, remote_sandbox
-from doubleblind_sandbox.images import BaseImage, BasePlan, directory_hash, ensure_base_image
+from doubleblind_sandbox.images import BaseImage, contract_wheel, ensure_base_image, repo_plan
 from doubleblind_sandbox.provider import SandboxError, SandboxProvider
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-RECIPES = REPO_ROOT / "sandboxes" / "tokenfactory"
 CONTRACT_PACKAGE = REPO_ROOT / "packages" / "contract"
-
-
-def party_plans(demo_dir: Path) -> list[BasePlan]:
-    return [
-        BasePlan("spokes", demo_dir / "spokes", RECIPES / "spokes.base.sh"),
-        BasePlan(
-            "parcelly",
-            demo_dir / "parcelly",
-            RECIPES / "parcelly.base.sh",
-            {"/opt/doubleblind/install_node.py": RECIPES / "install_node.py"},
-        ),
-    ]
-
-
-def contract_wheel() -> tuple[dict[str, bytes], str]:
-    with tempfile.TemporaryDirectory() as directory:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "wheel",
-                "--no-deps",
-                "--quiet",
-                "-w",
-                directory,
-                str(CONTRACT_PACKAGE),
-            ],
-            check=True,
-        )
-        wheels = {path.name: path.read_bytes() for path in Path(directory).glob("*.whl")}
-    return wheels, directory_hash(CONTRACT_PACKAGE / "doubleblind_contract")
 
 
 def load_base_images(path: Path) -> dict[str, str]:
@@ -68,9 +32,9 @@ async def build(
     demo_dir: Path, parties: list[str], force: bool, kind: str = "tokenfactory"
 ) -> list[BaseImage]:
     provider = build_provider(kind)
-    wheels, wheels_digest = contract_wheel()
+    wheels, wheels_digest = contract_wheel(CONTRACT_PACKAGE)
     try:
-        plans = [plan for plan in party_plans(demo_dir) if plan.party in parties]
+        plans = [repo_plan(party, demo_dir / party) for party in parties]
         results = await asyncio.gather(
             *(ensure_base_image(provider, plan, wheels, wheels_digest, force) for plan in plans),
             return_exceptions=True,

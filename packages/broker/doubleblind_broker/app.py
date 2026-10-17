@@ -96,7 +96,7 @@ def create_app(service: BrokerService | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    accounts, integrations = Accounts(service.engine), Integrations(service.engine)
+    accounts, integrations = Accounts(service.engine), Integrations(service)
     app.include_router(build_router(service, accounts, integrations))
     app.include_router(build_account_router(accounts, integrations))
     app.include_router(build_gateway_router(service))

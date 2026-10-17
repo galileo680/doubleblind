@@ -143,16 +143,15 @@ function SystemModel({ party }: { party: PartyView }) {
 }
 
 function QuestionCard({ question, canAnswer }: { question: Question; canAnswer: boolean }) {
-  const { token, data, replay } = useSessionContext();
+  const { id, token, data, replay } = useSessionContext();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const open = !question.answer;
   const answer = async (option: string) => {
-    if (!token) return;
     setBusy(option);
     setError(null);
     try {
-      await api.answer(question.id, token, option);
+      await api.answer(id, question.id, token, option);
       data.refresh();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));

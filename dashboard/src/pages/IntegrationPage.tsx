@@ -64,6 +64,18 @@ export function IntegrationPage({ id }: { id: string }) {
   const partnerRole = otherRole(integration.your_role);
   const partner = integration.companies[partnerRole];
   const command = agentKey && `doubleblind connect --broker ${location.origin} --key ${agentKey}`;
+  const mine = integration.agents[integration.your_role];
+  const theirs = integration.agents[partnerRole];
+  const running = integration.sessions.some(
+    (run) => !run.recorded && run.state !== "CERTIFIED" && run.state !== "FAILED",
+  );
+  const blocker = !partner
+    ? "Your partner has to join first."
+    : !mine?.online || !theirs?.online
+      ? "Both agents must be online."
+      : running
+        ? "A live run is in progress."
+        : null;
 
   return (
     <div className="page" data-testid="integration">
@@ -128,8 +140,10 @@ export function IntegrationPage({ id }: { id: string }) {
 
       <Card testId="agent-step">
         <CardHead title="2 · Connect your agent">
-          {integration.agent_key_issued ? (
-            <Badge tone="o">Key active</Badge>
+          {mine?.online ? (
+            <Badge tone="o">Agent online</Badge>
+          ) : integration.agent_key_issued ? (
+            <Badge tone="w">Agent offline</Badge>
           ) : (
             <Badge tone="n">No key</Badge>
           )}
@@ -139,6 +153,17 @@ export function IntegrationPage({ id }: { id: string }) {
             Your agent runs on your side, next to your code, and builds your half of the
             integration. Your code never leaves your company.
           </span>
+          {mine?.online && (
+            <span>
+              Your agent is online in <span className="mono">{mine.repo}</span> at commit{" "}
+              <span className="mono">{mine.commit}</span>.
+            </span>
+          )}
+          {partner && (
+            <span className="muted">
+              {partner}'s agent is {theirs?.online ? "online" : "offline"}.
+            </span>
+          )}
           {command && (
             <Secret
               text={command}
@@ -180,6 +205,32 @@ export function IntegrationPage({ id }: { id: string }) {
       <Card testId="run-step">
         <CardHead title="3 · Run the integration" />
         <div className="form-card" style={{ border: 0 }}>
+          <span className="fg2">
+            Start runs the real integration: both agents negotiate the contract, ask your people,
+            build and test their own side. Each company pays for its own models and sandboxes.
+          </span>
+          <div className="row wrap">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={blocker !== null}
+              onClick={() =>
+                act(async () => navigate(sessionPath((await api.startLive(id)).session_id)))
+              }
+            >
+              Start
+            </button>
+            {running && (
+              <button
+                type="button"
+                className="btn"
+                onClick={() => act(async () => void (await api.stopLive(id)))}
+              >
+                Stop run
+              </button>
+            )}
+            {blocker && <span className="muted">{blocker}</span>}
+          </div>
           <span className="fg2">
             Start (DEMO) plays a recorded, certified run between Spokes and Parcelly for both
             companies at once. No agents, no cost.

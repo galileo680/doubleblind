@@ -148,6 +148,12 @@ export interface Account {
   company: string;
 }
 
+export interface AgentStatus {
+  online: boolean;
+  repo?: string | null;
+  commit?: string | null;
+}
+
 export interface IntegrationRun {
   id: string;
   recorded: boolean;
@@ -163,6 +169,7 @@ export interface Integration {
   companies: Record<Role, string | null>;
   invite_expires_at: number | null;
   agent_key_issued: boolean;
+  agents: Partial<Record<Role, AgentStatus>>;
   sessions: IntegrationRun[];
 }
 

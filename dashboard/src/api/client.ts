@@ -81,6 +81,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ speed }),
     }),
+  startLive: (id: string) =>
+    request<{ session_id: string }>(`${integration(id)}/start`, null, { method: "POST" }),
+  stopLive: (id: string) => request<unknown>(`${integration(id)}/stop`, null, { method: "POST" }),
   revokeAgentKey: (id: string) =>
     request<unknown>(`${integration(id)}/agent-key`, null, { method: "DELETE" }),
   invite: (token: string) => request<InvitePreview>(`/invites/${encodeURIComponent(token)}`, null),
@@ -103,12 +106,12 @@ export const api = {
     request<string>(`${session(id)}/contract?version=${version}`, token),
   diff: (id: string, token: string | null, from: number, to: number) =>
     request<string>(`${session(id)}/contract/diff?from=${from}&to=${to}`, token),
-  answer: (qid: string, token: string, answer: string) =>
-    request<unknown>(`/questions/${encodeURIComponent(qid)}/answer`, token, {
+  answer: (id: string, qid: string, token: string | null, answer: string) =>
+    request<unknown>(`${session(id)}/questions/${encodeURIComponent(qid)}/answer`, token, {
       method: "POST",
       body: JSON.stringify({ answer }),
     }),
-  sign: (id: string, token: string, version: number) =>
+  sign: (id: string, token: string | null, version: number) =>
     request<unknown>(`${session(id)}/signatures`, token, {
       method: "POST",
       body: JSON.stringify({ version }),

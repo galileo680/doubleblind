@@ -1,0 +1,15 @@
+install: |
+  pip install --quiet --no-cache-dir --root-user-action=ignore -r requirements.txt
+synthetic_test_data:
+  phones:
+    - "07700 900200"
+    - "+447700900200"
+    - "0044 7700-900200"
+    - "+447700900300"
+    - "+447700900201"
+    - "+447700900202"
+    - "+447700900203"
+    - "+447700900204"
+    - "+447700900205"
+  emails:
+    - "john.smith@example.com"

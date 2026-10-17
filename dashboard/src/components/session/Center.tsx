@@ -329,7 +329,6 @@ export function SignaturesBar() {
   const signed = signedParties(data.events, version);
   const opened = awaiting || session.signed_contract_version !== null;
   const sign = async () => {
-    if (!token) return;
     setBusy(true);
     setError(null);
     try {

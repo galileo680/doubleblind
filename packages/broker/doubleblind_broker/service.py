@@ -19,6 +19,7 @@ from doubleblind_broker.db import (
     ContractVersionRecord,
     IntegrationSessionRecord,
     PartyRecord,
+    PresetRecord,
     QuestionRecord,
     SessionRecord,
     SignatureRecord,
@@ -256,8 +257,14 @@ class BrokerService:
 
     def preset(self, name: str) -> Preset:
         if name not in self.presets:
+            with open_session(self.engine) as db:
+                stored = db.get(PresetRecord, name)
             try:
-                self.presets[name] = load_preset(self.settings.presets_dir, name)
+                self.presets[name] = (
+                    Preset.model_validate_json(stored.preset_json)
+                    if stored
+                    else load_preset(self.settings.presets_dir, name)
+                )
             except PresetNotFoundError as error:
                 raise BrokerError(400, "UNKNOWN_PRESET", str(error)) from error
         return self.presets[name]
@@ -542,6 +549,16 @@ class BrokerService:
             db.commit()
         self.flush(session_id, outbox)
         return self.session_view(principal, session_id)
+
+    def cancel(self, session_id: str, actor: str) -> None:
+        outbox = Outbox()
+        with open_session(self.engine) as db:
+            record = self.session_record(db, session_id)
+            outbox.add("session.cancelled", actor, {})
+            self.apply_trigger(db, record, Trigger.FAILURE, outbox)
+            db.add(record)
+            db.commit()
+        self.flush(session_id, outbox)
 
     def publish(self, principal: Principal, session_id: str) -> dict[str, Any]:
         if self.settings.admin_token and principal.kind != "admin":
