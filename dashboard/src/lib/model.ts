@@ -34,6 +34,15 @@ export function roleTone(role: Role | undefined): Tone {
   return role === "provider" ? "b" : "a";
 }
 
+export const ROLE_TEXT: Record<Role, string> = {
+  provider: "Provider · exposes the API",
+  consumer: "Consumer · calls the partner's API",
+};
+
+export function otherRole(role: Role): Role {
+  return role === "provider" ? "consumer" : "provider";
+}
+
 export function payload<T>(event: BrokerEvent): T {
   return event.payload as T;
 }

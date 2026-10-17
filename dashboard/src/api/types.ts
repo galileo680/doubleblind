@@ -139,3 +139,26 @@ export interface CreatedSession {
   session_id: string;
   tokens: Record<string, string>;
 }
+
+export interface Account {
+  id: string;
+  email: string;
+  company: string;
+}
+
+export interface Integration {
+  id: string;
+  name: string;
+  created_at: string;
+  your_role: Role;
+  companies: Record<Role, string | null>;
+  invite_expires_at: number | null;
+  agent_key_issued: boolean;
+}
+
+export interface InvitePreview {
+  name: string;
+  invited_by: string | null;
+  your_role: Role;
+  expires_at: number;
+}

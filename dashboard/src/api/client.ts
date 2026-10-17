@@ -1,10 +1,14 @@
 import type {
+  Account,
   BrokerEvent,
   Certificate,
   CreatedSession,
+  Integration,
+  InvitePreview,
   ProbeReport,
   PublicSession,
   Question,
+  Role,
   SessionView,
 } from "./types";
 
@@ -40,8 +44,43 @@ async function request<T>(path: string, token: string | null, init: RequestInit 
 }
 
 const session = (id: string) => `/sessions/${encodeURIComponent(id)}`;
+const integration = (id: string) => `/integrations/${encodeURIComponent(id)}`;
+
+export function errorText(failure: unknown): string {
+  return failure instanceof Error ? failure.message : String(failure);
+}
 
 export const api = {
+  me: () => request<Account>("/auth/me", null),
+  signup: (email: string, password: string, company: string) =>
+    request<Account>("/auth/signup", null, {
+      method: "POST",
+      body: JSON.stringify({ email, password, company }),
+    }),
+  login: (email: string, password: string) =>
+    request<Account>("/auth/login", null, {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  logout: () => request<unknown>("/auth/logout", null, { method: "POST" }),
+  integrations: () => request<Integration[]>("/integrations", null),
+  integration: (id: string) => request<Integration>(integration(id), null),
+  createIntegration: (name: string, role: Role) =>
+    request<Integration>("/integrations", null, {
+      method: "POST",
+      body: JSON.stringify({ name, role }),
+    }),
+  newInvite: (id: string) =>
+    request<Integration & { invite_token: string }>(`${integration(id)}/invite`, null, {
+      method: "POST",
+    }),
+  newAgentKey: (id: string) =>
+    request<{ agent_key: string }>(`${integration(id)}/agent-key`, null, { method: "POST" }),
+  revokeAgentKey: (id: string) =>
+    request<unknown>(`${integration(id)}/agent-key`, null, { method: "DELETE" }),
+  invite: (token: string) => request<InvitePreview>(`/invites/${encodeURIComponent(token)}`, null),
+  acceptInvite: (token: string) =>
+    request<Integration>(`/invites/${encodeURIComponent(token)}/accept`, null, { method: "POST" }),
   publicSessions: () => request<PublicSession[]>("/public/sessions", null),
   createSession: (name: string, preset: string, adminToken: string | null) =>
     request<CreatedSession>("/sessions", adminToken, {

@@ -6,11 +6,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from doubleblind_broker.api import build_gateway_router, build_router
+from doubleblind_broker.accounts import Accounts
+from doubleblind_broker.api import build_account_router, build_gateway_router, build_router
 from doubleblind_broker.autopilot import DefaultOptionSimulator, HumanSimulator, LLMHumanSimulator
 from doubleblind_broker.db import build_engine
 from doubleblind_broker.e2e import E2EExecutor, SandboxGatewayE2E, UnavailableE2E
 from doubleblind_broker.gateway import GatewayError
+from doubleblind_broker.integrations import Integrations
 from doubleblind_broker.service import BrokerError, BrokerService, BrokerSettings, IsolationProbe
 from doubleblind_sandbox.environment import gateway_url, recorded_bases, remote_sandbox
 from doubleblind_sandbox.isolation_probe import SandboxIsolationProbe
@@ -94,7 +96,9 @@ def create_app(service: BrokerService | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    app.include_router(build_router(service))
+    accounts, integrations = Accounts(service.engine), Integrations(service.engine)
+    app.include_router(build_router(service, accounts, integrations))
+    app.include_router(build_account_router(accounts, integrations))
     app.include_router(build_gateway_router(service))
     if DASHBOARD_DIST.is_dir():
         app.mount("/", StaticFiles(directory=DASHBOARD_DIST, html=True), name="dashboard")

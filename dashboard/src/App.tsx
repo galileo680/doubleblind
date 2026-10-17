@@ -1,13 +1,17 @@
 import { Shell } from "./components/Shell";
 import { Empty } from "./components/ui";
+import { AuthPage } from "./pages/AuthPage";
 import { CertificatePage } from "./pages/CertificatePage";
 import { ContractPage } from "./pages/ContractPage";
 import { GatewayPage } from "./pages/GatewayPage";
 import { HomePage } from "./pages/HomePage";
+import { IntegrationPage } from "./pages/IntegrationPage";
+import { IntegrationsPage } from "./pages/IntegrationsPage";
+import { InvitePage } from "./pages/InvitePage";
 import { IsolationPage } from "./pages/IsolationPage";
 import { PresentationPage } from "./pages/PresentationPage";
 import { SessionPage } from "./pages/SessionPage";
-import { useRoute, type SessionTab } from "./state/route";
+import { useRoute, type Route, type SessionTab } from "./state/route";
 import { SessionScope, useSessionContext } from "./state/session";
 import { useTheme } from "./state/theme";
 
@@ -42,6 +46,22 @@ function SessionRoute({ tab }: { tab: SessionTab }) {
   return <Page />;
 }
 
+function TopPage({ route }: { route: Exclude<Route, { page: "session" }> }) {
+  switch (route.page) {
+    case "home":
+      return <HomePage />;
+    case "login":
+    case "signup":
+      return <AuthPage key={route.page} mode={route.page} next={route.next} />;
+    case "integrations":
+      return <IntegrationsPage />;
+    case "integration":
+      return <IntegrationPage key={route.id} id={route.id} />;
+    case "invite":
+      return <InvitePage key={route.token} token={route.token} />;
+  }
+}
+
 export function App() {
   const route = useRoute();
   const [theme, toggleTheme] = useTheme();
@@ -66,7 +86,7 @@ export function App() {
 
   return (
     <Shell route={route} theme={theme} onToggleTheme={toggleTheme}>
-      <HomePage />
+      <TopPage route={route} />
     </Shell>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { sessionPath, type Route, type SessionTab } from "../state/route";
+import { signOut, useAccount } from "../state/account";
+import { authPath, sessionPath, type Route, type SessionTab } from "../state/route";
 import { useOptionalSession } from "../state/session";
 import { Logo } from "./ui";
 
@@ -56,6 +57,28 @@ function NavItem({
   );
 }
 
+function AccountMenu() {
+  const account = useAccount();
+  if (account.status === "loading") return null;
+  if (account.status === "signed-out") {
+    return (
+      <a className="btn btn-sm" href={authPath("login", "#/integrations")}>
+        Sign in
+      </a>
+    );
+  }
+  return (
+    <span className="row" style={{ gap: 8 }} data-testid="account-menu">
+      <span className="fg2" title={account.account.email}>
+        {account.account.company}
+      </span>
+      <button type="button" className="btn btn-sm" onClick={() => void signOut()}>
+        Sign out
+      </button>
+    </span>
+  );
+}
+
 export function Shell({
   route,
   theme,
@@ -89,6 +112,13 @@ export function Shell({
         <nav className="nav">
           <div className="nav-group">
             {wide && <span className="label">Workspace</span>}
+            <NavItem
+              href="#/integrations"
+              label="Integrations"
+              glyph="IN"
+              on={route.page === "integrations" || route.page === "integration"}
+              wide={wide}
+            />
             <NavItem href="#/" label="Sessions" glyph="SE" on={route.page === "home"} wide={wide} />
           </div>
           {route.page === "session" && (
@@ -125,7 +155,11 @@ export function Shell({
       <main className="main">
         <header className="topbar">
           <div className="crumbs">
-            <a href="#/">Sessions</a>
+            {route.page === "integrations" || route.page === "integration" ? (
+              <a href="#/integrations">Integrations</a>
+            ) : (
+              <a href="#/">Sessions</a>
+            )}
             {route.page === "session" && (
               <>
                 <span className="sep">/</span>
@@ -147,6 +181,7 @@ export function Shell({
               {scope.data.live ? "Live" : "Connecting"}
             </span>
           )}
+          <AccountMenu />
           <button type="button" className="btn btn-sm theme-btn" onClick={onToggleTheme}>
             <span className="half" />
             {theme === "dark" ? "Dark" : "Light"}

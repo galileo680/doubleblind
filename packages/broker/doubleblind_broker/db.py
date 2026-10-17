@@ -141,6 +141,50 @@ class TestRunRecord(SQLModel, table=True):
     created_at: str
 
 
+class AccountRecord(SQLModel, table=True):
+    __tablename__ = "accounts"
+
+    id: str = Field(primary_key=True)
+    email: str = Field(unique=True)
+    company: str
+    password_hash: str
+    created_at: str
+
+
+class LoginRecord(SQLModel, table=True):
+    __tablename__ = "logins"
+
+    token_hash: str = Field(primary_key=True)
+    account_id: str = Field(index=True)
+    expires_at: int
+
+
+class IntegrationRecord(SQLModel, table=True):
+    __tablename__ = "integrations"
+
+    id: str = Field(primary_key=True)
+    name: str
+    created_at: str
+    invite_token_hash: str | None = Field(default=None, index=True)
+    invite_expires_at: int | None = None
+
+
+class MemberRecord(SQLModel, table=True):
+    __tablename__ = "integration_members"
+
+    integration_id: str = Field(primary_key=True)
+    role: str = Field(primary_key=True)
+    account_id: str = Field(index=True)
+    agent_key_hash: str | None = Field(default=None, index=True)
+
+
+class IntegrationSessionRecord(SQLModel, table=True):
+    __tablename__ = "integration_sessions"
+
+    session_id: str = Field(primary_key=True)
+    integration_id: str = Field(index=True)
+
+
 def build_engine(url: str) -> Engine:
     if url in IN_MEMORY_URLS:
         engine = create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
