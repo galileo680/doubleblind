@@ -51,11 +51,8 @@ export function useContractText(
   version: number | null,
   revision = 0,
 ) {
-  const key = token && version ? `${id}:${version}:${revision}` : null;
-  const load = useMemo(
-    () => () => api.contract(id, token ?? "", version ?? 1),
-    [id, token, version],
-  );
+  const key = version ? `${id}:${version}:${revision}` : null;
+  const load = useMemo(() => () => api.contract(id, token, version ?? 1), [id, token, version]);
   return useCached(texts, key, load);
 }
 
@@ -74,7 +71,7 @@ export function useContract(
 }
 
 export function useContractDiff(id: string, token: string | null, from: number, to: number) {
-  const key = token && from > 0 && to > from ? `${id}:${from}:${to}` : null;
-  const load = useMemo(() => () => api.diff(id, token ?? "", from, to), [id, token, from, to]);
+  const key = from > 0 && to > from ? `${id}:${from}:${to}` : null;
+  const load = useMemo(() => () => api.diff(id, token, from, to), [id, token, from, to]);
   return useCached(diffs, key, load);
 }

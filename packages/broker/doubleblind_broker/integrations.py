@@ -11,9 +11,11 @@ from doubleblind_broker.db import (
     IntegrationSessionRecord,
     MemberRecord,
     PartyRecord,
+    SessionRecord,
     open_session,
 )
 from doubleblind_broker.events import utc_now
+from doubleblind_broker.recording import add_recorded_run
 from doubleblind_broker.service import BrokerError
 from doubleblind_broker.tokens import Principal, hash_token, new_token
 
@@ -56,6 +58,12 @@ class Integrations:
         for role, member in members.items():
             account = db.get(AccountRecord, member.account_id)
             companies[role] = account.company if account else None
+        links = db.exec(
+            select(IntegrationSessionRecord).where(
+                IntegrationSessionRecord.integration_id == integration.id
+            )
+        )
+        runs = [(link, db.get(SessionRecord, link.session_id)) for link in links]
         return {
             "id": integration.id,
             "name": integration.name,
@@ -64,6 +72,20 @@ class Integrations:
             "companies": companies,
             "invite_expires_at": integration.invite_expires_at,
             "agent_key_issued": mine.agent_key_hash is not None,
+            "sessions": sorted(
+                (
+                    {
+                        "id": session.id,
+                        "recorded": link.recorded,
+                        "state": session.state,
+                        "created_at": session.created_at,
+                    }
+                    for link, session in runs
+                    if session is not None
+                ),
+                key=lambda run: run["created_at"],
+                reverse=True,
+            ),
         }
 
     def create(self, account_id: str, name: str, role: str) -> dict[str, Any]:
@@ -173,6 +195,20 @@ class Integrations:
             member.agent_key_hash = None
             db.add(member)
             db.commit()
+
+    def start_demo(self, account_id: str, integration_id: str, speed: int) -> dict[str, str]:
+        with open_session(self.engine) as db:
+            self.membership(db, integration_id, account_id)
+            if len(self.members(db, integration_id)) < len(ROLES):
+                raise BrokerError(409, "PARTNER_MISSING", "Your partner has not joined yet.")
+            session_id = add_recorded_run(db, speed)
+            db.add(
+                IntegrationSessionRecord(
+                    session_id=session_id, integration_id=integration_id, recorded=True
+                )
+            )
+            db.commit()
+        return {"session_id": session_id}
 
     def session_principal(self, account_id: str, session_id: str) -> Principal:
         with open_session(self.engine) as db:

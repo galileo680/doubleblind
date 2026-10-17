@@ -14,7 +14,7 @@ export interface SessionData {
   refresh: () => void;
 }
 
-export function useSessionData(id: string, token: string | null): SessionData {
+export function useSessionData(id: string, token: string | null, access: boolean): SessionData {
   const [events, setEvents] = useState<BrokerEvent[]>([]);
   const [session, setSession] = useState<SessionView | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
@@ -23,7 +23,7 @@ export function useSessionData(id: string, token: string | null): SessionData {
   const refreshTimer = useRef<number | undefined>(undefined);
 
   const load = useCallback(async () => {
-    if (!token) return;
+    if (!access) return;
     try {
       const [view, asked] = await Promise.all([api.session(id, token), api.questions(id, token)]);
       setSession(view);
@@ -32,7 +32,7 @@ export function useSessionData(id: string, token: string | null): SessionData {
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     }
-  }, [id, token]);
+  }, [id, token, access]);
 
   const refresh = useCallback(() => {
     window.clearTimeout(refreshTimer.current);
@@ -44,7 +44,7 @@ export function useSessionData(id: string, token: string | null): SessionData {
     setSession(null);
     setQuestions([]);
     setLive(false);
-    if (!token) return;
+    if (!access) return;
     let closed = false;
     let source: EventSource | null = null;
     let retry: number | undefined;
@@ -99,7 +99,7 @@ export function useSessionData(id: string, token: string | null): SessionData {
       window.clearTimeout(retry);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [id, token, load, refresh]);
+  }, [id, token, access, load, refresh]);
 
   useEffect(() => () => window.clearTimeout(refreshTimer.current), []);
 

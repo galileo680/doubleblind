@@ -48,6 +48,12 @@ class CreateIntegrationIn(BaseModel):
     role: Literal["consumer", "provider"]
 
 
+class DemoIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    speed: int = Field(ge=1, le=60)
+
+
 class CreateSessionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -309,6 +315,10 @@ def build_account_router(accounts: Accounts, integrations: Integrations) -> APIR
     def revoke_agent_key(integration_id: str, member: Member) -> Response:
         integrations.revoke_agent_key(member, integration_id)
         return Response(status_code=204)
+
+    @router.post("/integrations/{integration_id}/demo", status_code=201)
+    def start_demo(integration_id: str, body: DemoIn, member: Member) -> dict[str, str]:
+        return integrations.start_demo(member, integration_id, body.speed)
 
     @router.get("/invites/{token}")
     def invite(token: str) -> dict[str, Any]:

@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { api, errorText } from "../api/client";
 import type { Integration } from "../api/types";
 import { CopyButton } from "../components/session/Header";
-import { Badge, Card, CardHead, Spinner } from "../components/ui";
+import { Badge, Card, CardHead, Segmented, Spinner, StateBadge } from "../components/ui";
+import { dateTime } from "../lib/format";
 import { otherRole, ROLE_TEXT } from "../lib/model";
 import { useAccount } from "../state/account";
-import { integrationPath } from "../state/route";
+import { integrationPath, navigate, sessionPath } from "../state/route";
 import { SignInFirst } from "./IntegrationsPage";
 
 const REFRESH_MS = 4000;
+const DEMO_SPEEDS = ["1", "5", "20"] as const;
 
 function Secret({ text, note }: { text: string; note: string }) {
   return (
@@ -28,6 +30,7 @@ export function IntegrationPage({ id }: { id: string }) {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [agentKey, setAgentKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [speed, setSpeed] = useState<(typeof DEMO_SPEEDS)[number]>("5");
   const signedIn = account.status === "signed-in";
 
   useEffect(() => {
@@ -172,6 +175,48 @@ export function IntegrationPage({ id }: { id: string }) {
             )}
           </div>
         </div>
+      </Card>
+
+      <Card testId="run-step">
+        <CardHead title="3 · Run the integration" />
+        <div className="form-card" style={{ border: 0 }}>
+          <span className="fg2">
+            Start (DEMO) plays a recorded, certified run between Spokes and Parcelly for both
+            companies at once. No agents, no cost.
+          </span>
+          <div className="row wrap">
+            <Segmented
+              value={speed}
+              onChange={setSpeed}
+              options={DEMO_SPEEDS.map((value) => ({ value, label: `${value}×` }))}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!partner}
+              title={partner ? undefined : "Your partner has to join first"}
+              onClick={() =>
+                act(async () =>
+                  navigate(sessionPath((await api.startDemo(id, Number(speed))).session_id)),
+                )
+              }
+            >
+              Start (DEMO)
+            </button>
+          </div>
+        </div>
+        {integration.sessions.map((run) => (
+          <div
+            key={run.id}
+            className="trow click"
+            style={{ gridTemplateColumns: "160px 1fr 200px" }}
+            onClick={() => navigate(sessionPath(run.id))}
+          >
+            {run.recorded ? <Badge tone="w">Recorded run</Badge> : <StateBadge state={run.state} />}
+            <span className="mono muted">{run.id}</span>
+            <span className="muted">{dateTime(run.created_at)}</span>
+          </div>
+        ))}
       </Card>
     </div>
   );

@@ -17,6 +17,7 @@ from doubleblind_broker import contracts
 from doubleblind_broker.autopilot import DefaultOptionSimulator, HumanSimulator, autopilot_answer
 from doubleblind_broker.db import (
     ContractVersionRecord,
+    IntegrationSessionRecord,
     PartyRecord,
     QuestionRecord,
     SessionRecord,
@@ -586,9 +587,12 @@ class BrokerService:
             record = self.session_record(db, session_id)
             roles = self.roles(db, session_id)
             unanswered = self.unanswered_questions(db, session_id)
+            link = db.get(IntegrationSessionRecord, session_id)
         return {
             "id": record.id,
             "name": record.name,
+            "recorded": link is not None and link.recorded,
+            "you": principal.party_key,
             "preset": record.preset,
             "state": record.state,
             "round": record.round,

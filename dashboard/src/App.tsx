@@ -11,7 +11,8 @@ import { InvitePage } from "./pages/InvitePage";
 import { IsolationPage } from "./pages/IsolationPage";
 import { PresentationPage } from "./pages/PresentationPage";
 import { SessionPage } from "./pages/SessionPage";
-import { useRoute, type Route, type SessionTab } from "./state/route";
+import { useAccount } from "./state/account";
+import { authPath, useRoute, type Route, type SessionTab } from "./state/route";
 import { SessionScope, useSessionContext } from "./state/session";
 import { useTheme } from "./state/theme";
 
@@ -24,20 +25,22 @@ const PAGES: Record<SessionTab, () => React.JSX.Element> = {
 };
 
 function SessionRoute({ tab }: { tab: SessionTab }) {
-  const { stored, token } = useSessionContext();
-  if (!stored || !token) {
+  const { token } = useSessionContext();
+  const account = useAccount();
+  if (!token && account.status === "loading") return null;
+  if (!token && account.status === "signed-out") {
     return (
       <div className="page">
         <Empty
           title="No access to this session in this browser"
           action={
-            <a className="btn" href="#/">
-              Back to sessions
+            <a className="btn btn-primary" href={authPath("login", location.hash)}>
+              Sign in
             </a>
           }
         >
-          Open the session with a link that carries its tokens (the session page has “Copy link”),
-          or create a new session.
+          Sign in with your company account, or open the session with a link that carries its
+          tokens.
         </Empty>
       </div>
     );

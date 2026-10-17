@@ -47,6 +47,8 @@ export interface PartyView {
 export interface SessionView {
   id: string;
   name: string;
+  recorded: boolean;
+  you: string | null;
   preset: string;
   state: SessionState;
   round: number;
@@ -146,6 +148,13 @@ export interface Account {
   company: string;
 }
 
+export interface IntegrationRun {
+  id: string;
+  recorded: boolean;
+  state: SessionState;
+  created_at: string;
+}
+
 export interface Integration {
   id: string;
   name: string;
@@ -154,6 +163,7 @@ export interface Integration {
   companies: Record<Role, string | null>;
   invite_expires_at: number | null;
   agent_key_issued: boolean;
+  sessions: IntegrationRun[];
 }
 
 export interface InvitePreview {

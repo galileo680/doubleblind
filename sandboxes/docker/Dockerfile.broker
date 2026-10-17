@@ -16,6 +16,7 @@ COPY packages/contract packages/contract
 COPY packages/sandbox packages/sandbox
 COPY packages/broker packages/broker
 COPY demo/presets demo/presets
+COPY demo/recordings/certified-run.json demo/recordings/certified-run.json
 COPY config config
 COPY --from=dashboard /dashboard/dist dashboard/dist
 

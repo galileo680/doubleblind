@@ -183,6 +183,7 @@ class IntegrationSessionRecord(SQLModel, table=True):
 
     session_id: str = Field(primary_key=True)
     integration_id: str = Field(index=True)
+    recorded: bool = False
 
 
 def build_engine(url: str) -> Engine:

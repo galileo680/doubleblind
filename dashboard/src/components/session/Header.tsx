@@ -4,7 +4,7 @@ import { elapsedMs, probeResults, roleTone } from "../../lib/model";
 import { navigate, sessionPath } from "../../state/route";
 import { OBSERVER, useSessionContext } from "../../state/session";
 import { shareLink } from "../../state/sessions";
-import { CodeShared, Segmented, StateBadge, Swatch } from "../ui";
+import { Badge, CodeShared, Segmented, StateBadge, Swatch } from "../ui";
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -55,6 +55,18 @@ function AgentsConnect() {
 
 export function ReplayBar() {
   const { replay } = useSessionContext();
+  if (replay.recorded) {
+    return (
+      <div className="row" data-testid="recorded-run">
+        <Badge tone="w" pulse={replay.position < replay.total}>
+          Recorded run
+        </Badge>
+        <span className="mono muted">
+          {replay.position}/{replay.total}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="row" data-testid="replay-bar">
       {replay.active ? (

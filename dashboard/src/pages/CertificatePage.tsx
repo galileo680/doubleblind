@@ -28,7 +28,6 @@ export function CertificatePage() {
   const state = session?.state;
 
   useEffect(() => {
-    if (!token) return;
     let cancelled = false;
     api
       .certificate(id, token)
@@ -107,7 +106,7 @@ export function CertificatePage() {
         </div>
         <a
           className="btn btn-lg"
-          href={token ? certificateHtmlUrl(id, token) : "#"}
+          href={certificateHtmlUrl(id, token)}
           target="_blank"
           rel="noreferrer"
         >

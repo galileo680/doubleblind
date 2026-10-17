@@ -10,6 +10,7 @@ import {
 import type { PartyView } from "../api/types";
 import { roleTone, type Tone } from "../lib/model";
 import { replayQuestions, replaySession, stepDelay, type ReplaySpeed } from "../lib/replay";
+import { useAccount } from "./account";
 import { importFromParams, useStoredSession, type StoredSession } from "./sessions";
 import { useSessionData, type SessionData } from "./useSessionData";
 
@@ -24,6 +25,7 @@ export interface ViewOption {
 
 export interface ReplayControls {
   active: boolean;
+  recorded: boolean;
   playing: boolean;
   position: number;
   total: number;
@@ -81,6 +83,7 @@ export function SessionScope({
   children: ReactNode;
 }) {
   const stored = useStoredSession(id);
+  const account = useAccount();
   const [view, setViewState] = useState(() => initialView(id, stored));
   const [now, setNow] = useState(() => Date.now());
 
@@ -97,13 +100,17 @@ export function SessionScope({
     if (!tokenFor(stored, view)) setViewState(initialView(id, stored));
   }, [id, stored, view]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
   const token = tokenFor(stored, view);
-  const live = useSessionData(id, token);
+  const cookie = token === null && account.status === "signed-in";
+  const live = useSessionData(id, token, token !== null || cookie);
+  const recorded = live.session?.recorded ?? false;
+  const shownView = cookie ? (live.session?.you ?? OBSERVER) : view;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), recorded ? 250 : 1000);
+    return () => window.clearInterval(timer);
+  }, [recorded]);
+
   const [position, setPosition] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<ReplaySpeed>("normal");
@@ -131,21 +138,26 @@ export function SessionScope({
     return () => window.clearTimeout(timer);
   }, [position, playing, total, speed, live.events]);
 
+  const shown = recorded
+    ? live.events.filter((event) => Date.parse(event.ts) <= now).length
+    : position;
+
   const data = useMemo<SessionData>(() => {
-    if (position === null) return live;
-    const events = live.events.slice(0, position);
+    if (shown === null) return live;
+    const events = live.events.slice(0, shown);
     return {
       ...live,
       events,
       session: live.session ? replaySession(live.session, events) : null,
       questions: replayQuestions(events),
     };
-  }, [live, position]);
+  }, [live, shown]);
 
   const replay: ReplayControls = {
-    active: position !== null,
+    active: shown !== null,
+    recorded,
     playing,
-    position: position ?? total,
+    position: shown ?? total,
     total,
     speed,
     start: () => {
@@ -163,7 +175,7 @@ export function SessionScope({
     setSpeed,
   };
   const shownNow =
-    position !== null ? new Date(data.events.at(-1)?.ts ?? Date.now()).getTime() : now;
+    position !== null && !recorded ? new Date(data.events.at(-1)?.ts ?? Date.now()).getTime() : now;
 
   const setView = (next: string) => {
     sessionStorage.setItem(`doubleblind.view.${id}`, next);
@@ -184,21 +196,26 @@ export function SessionScope({
         value: party.party,
         label: party.display_name,
         tone: roleTone(party.role),
-        disabled: !stored?.humans[party.party],
+        disabled: cookie ? party.party !== shownView : !stored?.humans[party.party],
       })),
-      { value: OBSERVER, label: "Observer", tone: "fg3" as const, disabled: !stored?.observer },
+      {
+        value: OBSERVER,
+        label: "Observer",
+        tone: "fg3" as const,
+        disabled: cookie || !stored?.observer,
+      },
     ];
-  }, [parties, stored]);
+  }, [parties, stored, cookie, shownView]);
 
   const ownParty =
-    view === OBSERVER ? null : (parties?.find((party) => party.party === view) ?? null);
+    shownView === OBSERVER ? null : (parties?.find((party) => party.party === shownView) ?? null);
 
   return (
     <SessionContext.Provider
       value={{
         id,
         stored,
-        view,
+        view: shownView,
         setView,
         token,
         ownParty,

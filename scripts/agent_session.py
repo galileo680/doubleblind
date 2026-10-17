@@ -9,7 +9,7 @@ import tempfile
 import threading
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from demo_workspace import REPO_ROOT
@@ -229,7 +229,7 @@ def run_agents(
         }
         if target := os.environ.get("DOUBLEBLIND_DEMO_DB"):
             with sqlite3.connect(target) as copy:
-                engine.raw_connection().driver_connection.backup(copy)
+                cast(sqlite3.Connection, engine.raw_connection().driver_connection).backup(copy)
         if hold:
             hold_broker(url)
         return outcome

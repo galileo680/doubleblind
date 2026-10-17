@@ -76,6 +76,11 @@ export const api = {
     }),
   newAgentKey: (id: string) =>
     request<{ agent_key: string }>(`${integration(id)}/agent-key`, null, { method: "POST" }),
+  startDemo: (id: string, speed: number) =>
+    request<{ session_id: string }>(`${integration(id)}/demo`, null, {
+      method: "POST",
+      body: JSON.stringify({ speed }),
+    }),
   revokeAgentKey: (id: string) =>
     request<unknown>(`${integration(id)}/agent-key`, null, { method: "DELETE" }),
   invite: (token: string) => request<InvitePreview>(`/invites/${encodeURIComponent(token)}`, null),
@@ -89,13 +94,14 @@ export const api = {
     }),
   start: (id: string, token: string) =>
     request<SessionView>(`${session(id)}/start`, token, { method: "POST" }),
-  session: (id: string, token: string) => request<SessionView>(session(id), token),
-  events: (id: string, token: string, since = 0) =>
+  session: (id: string, token: string | null) => request<SessionView>(session(id), token),
+  events: (id: string, token: string | null, since = 0) =>
     request<BrokerEvent[]>(`${session(id)}/events?since=${since}`, token),
-  questions: (id: string, token: string) => request<Question[]>(`${session(id)}/questions`, token),
-  contract: (id: string, token: string, version: number) =>
+  questions: (id: string, token: string | null) =>
+    request<Question[]>(`${session(id)}/questions`, token),
+  contract: (id: string, token: string | null, version: number) =>
     request<string>(`${session(id)}/contract?version=${version}`, token),
-  diff: (id: string, token: string, from: number, to: number) =>
+  diff: (id: string, token: string | null, from: number, to: number) =>
     request<string>(`${session(id)}/contract/diff?from=${from}&to=${to}`, token),
   answer: (qid: string, token: string, answer: string) =>
     request<unknown>(`/questions/${encodeURIComponent(qid)}/answer`, token, {
@@ -107,16 +113,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ version }),
     }),
-  certificate: (id: string, token: string) =>
+  certificate: (id: string, token: string | null) =>
     request<Certificate>(`${session(id)}/certificate`, token),
   isolationProbe: (id: string, token: string) =>
     request<ProbeReport>(`${session(id)}/isolation-probe`, token, { method: "POST" }),
 };
 
-export function streamUrl(id: string, token: string, since: number): string {
-  return `${API}${session(id)}/events/stream?since=${since}&token=${encodeURIComponent(token)}`;
+const tokenParam = (token: string | null) => (token ? `&token=${encodeURIComponent(token)}` : "");
+
+export function streamUrl(id: string, token: string | null, since: number): string {
+  return `${API}${session(id)}/events/stream?since=${since}${tokenParam(token)}`;
 }
 
-export function certificateHtmlUrl(id: string, token: string): string {
-  return `${API}${session(id)}/certificate?format=html&token=${encodeURIComponent(token)}`;
+export function certificateHtmlUrl(id: string, token: string | null): string {
+  return `${API}${session(id)}/certificate?format=html${tokenParam(token)}`;
 }
