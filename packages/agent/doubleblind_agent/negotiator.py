@@ -314,23 +314,31 @@ async def propose_turn(
 
     locked = bool(context.get("api_from_spec"))
     provider_owned = provider_scenarios(context["contract"])
+    gap = context.get("gap") or {}
+    amended = {
+        str(index)
+        for index, item in enumerate(context["contract"].get("scenarios") or [])
+        if item.get("id") in gap.get("scenario_ids", [])
+    }
+
+    def reason_of(path: str) -> str | None:
+        found = foreign_patch(path, role, locked, provider_owned)
+        parts = path.strip("/").split("/")
+        if found or not amended or parts[:2] == ["setup", role]:
+            return found
+        if parts[0] == "scenarios" and parts[1:2] and parts[1] in amended:
+            return None
+        return (
+            f"while amending only the scenarios named in the gap "
+            f"({', '.join(gap['scenario_ids'])}) and /setup/{role} may change"
+        )
 
     def foreign(candidate: Turn) -> list[str]:
         paths = [item.path for item in candidate.patches]
-        return sorted(
-            {
-                reason
-                for path in paths
-                if (reason := foreign_patch(path, role, locked, provider_owned))
-            }
-        )
+        return sorted({reason for path in paths if (reason := reason_of(path))})
 
     def own(candidate: Turn) -> Turn:
-        kept = [
-            patch
-            for patch in candidate.patches
-            if not foreign_patch(patch.path, role, locked, provider_owned)
-        ]
+        kept = [patch for patch in candidate.patches if not reason_of(patch.path)]
         return candidate.model_copy(update={"patches": kept})
 
     def problems_of(candidate: Turn) -> list[str]:

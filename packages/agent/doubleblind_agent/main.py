@@ -36,9 +36,9 @@ ACTIONS = frozenset(
 
 UNDELIVERED_WEBHOOKS = (
     "No webhook reached the consumer during the end-to-end test, so steps that wait for one fail. "
-    "The provider's setup must register the consumer's webhook receiver at {{capture.url}} before "
-    "each e2e scenario (a do step calling a binding action), so the provider delivers its webhooks "
-    "there."
+    "Before each e2e scenario the provider must be told to deliver its webhooks to "
+    "{{capture.url}}, for example a do step in the provider's setup that registers that URL with "
+    "a binding action."
 )
 
 

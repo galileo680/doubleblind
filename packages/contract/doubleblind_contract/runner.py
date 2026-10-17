@@ -1,4 +1,5 @@
 import tempfile
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -24,6 +25,8 @@ from doubleblind_contract.validate import validate_contract_file
 
 BindingPaths = Mapping[PartyRole, Path]
 APP_START_ORDER: tuple[PartyRole, ...] = ("provider", "consumer")
+LOG_QUIET_S = 0.3
+LOG_SETTLE_MAX_S = 3.0
 
 
 def load_bindings(paths: BindingPaths, env: Mapping[str, str]) -> dict[PartyRole, Binding]:
@@ -111,6 +114,18 @@ def apps_log_tail(apps: Sequence[ManagedApp]) -> str:
     return "\n".join(f"--- {app.name} app ---\n{app.log_tail()}" for app in apps)
 
 
+def settled_log_tail(apps: Sequence[ManagedApp]) -> str:
+    deadline = time.monotonic() + LOG_SETTLE_MAX_S
+    tail = apps_log_tail(apps)
+    while time.monotonic() < deadline:
+        time.sleep(LOG_QUIET_S)
+        latest = apps_log_tail(apps)
+        if latest == tail:
+            break
+        tail = latest
+    return tail
+
+
 def failed_start_results(
     scenarios: Sequence[Scenario], error: AppStartError
 ) -> list[ScenarioResult]:
@@ -138,7 +153,7 @@ def run_scenarios(
             environment.capture.reset()
         result = ScenarioExecutor(environment, scenario).run()
         if result.status != "passed" and apps:
-            result.app_log_tail = apps_log_tail(apps)
+            result.app_log_tail = settled_log_tail(apps)
         results.append(result)
     return results
 

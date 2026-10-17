@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.13.13-slim@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286
 
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
@@ -8,8 +8,9 @@ COPY packages/contract packages/contract
 COPY packages/sandbox packages/sandbox
 COPY packages/agent packages/agent
 COPY config config
+COPY constraints.txt constraints.txt
 
-RUN pip install \
+RUN pip install -c constraints.txt \
     -e packages/llm \
     -e packages/contract \
     -e packages/sandbox \

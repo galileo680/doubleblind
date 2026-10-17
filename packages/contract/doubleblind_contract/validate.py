@@ -35,6 +35,7 @@ from doubleblind_contract.models import (
     Step,
 )
 from doubleblind_contract.templating import (
+    TEMPLATE,
     TemplateError,
     expression_root,
     is_whole_template,
@@ -175,7 +176,7 @@ def check_operation_paths(contract: Contract, report: ValidationReport) -> None:
             report.error(
                 RULE_REFERENCES,
                 f"operations.{operation_id}.request.path",
-                "path parameters are written as {name}, e.g. /shipments/{id}",
+                "path parameters are written as {name}, e.g. /records/{id}",
             )
 
 
@@ -600,10 +601,50 @@ def validate_contract_data(
     check_decision_coverage(contract, report)
     check_ctx_order(contract, report)
     check_match_operators(contract, report)
+    check_templates(data, report)
     if resolved is not None:
         check_stub_bodies(resolved, report)
         check_match_schemas(resolved, report)
     return report
+
+
+def broken_templates(value: Any, path: str) -> list[tuple[str, str]]:
+    if isinstance(value, str):
+        rest = TEMPLATE.sub("", value)
+        return [(path, value)] if "{{" in rest or "}}" in rest else []
+    if isinstance(value, Mapping):
+        return [
+            found
+            for key, item in value.items()
+            for found in broken_templates(item, f"{path}.{key}")
+        ]
+    if isinstance(value, list):
+        return [
+            found
+            for index, item in enumerate(value)
+            for found in broken_templates(item, f"{path}[{index}]")
+        ]
+    return []
+
+
+def check_templates(data: Mapping[str, Any], report: ValidationReport) -> None:
+    for section in ("scenarios", "setup"):
+        for path, text in broken_templates(data.get(section), section):
+            report.error(
+                RULE_CONSISTENCY,
+                path,
+                f"'{text}' has a broken template; write each one as {{{{name.path}}}}",
+            )
+
+
+def emitted_webhooks(scenarios: Any) -> set[str]:
+    return {
+        str(step["expect_emitted"].get("webhook"))
+        for scenario in (scenarios if isinstance(scenarios, list) else [])
+        if isinstance(scenario, dict) and scenario.get("side") == "provider"
+        for step in scenario.get("steps") or []
+        if isinstance(step, dict) and isinstance(step.get("expect_emitted"), dict)
+    }
 
 
 def provider_scenarios(contract: Mapping[str, Any]) -> set[str]:
@@ -645,21 +686,32 @@ def ownership_problems(patches: Iterable[Mapping[str, Any]], role: str) -> list[
 
 def signing_problems(data: Mapping[str, Any]) -> list[str]:
     scenarios = data.get("scenarios")
+    webhooks = data.get("webhooks")
+    emitted = emitted_webhooks(scenarios)
     counts = Counter(
         scenario.get("side")
         for scenario in (scenarios if isinstance(scenarios, list) else [])
         if isinstance(scenario, dict)
     )
-    return [
-        f"ready_to_sign needs at least one {side} scenario ({purpose})"
-        for side, purpose in SIGNING_SIDES.items()
-        if side not in counts
-    ] + [
-        f"ready_to_sign allows at most {limit} {side} scenarios, found {counts[side]}; "
-        "keep only scenarios for behavior that crosses the boundary and merge the rest"
-        for side, limit in MAX_SCENARIOS.items()
-        if counts[side] > limit
-    ]
+    return (
+        [
+            f"ready_to_sign needs at least one {side} scenario ({purpose})"
+            for side, purpose in SIGNING_SIDES.items()
+            if side not in counts
+        ]
+        + [
+            f"ready_to_sign allows at most {limit} {side} scenarios, found {counts[side]}; "
+            "keep only scenarios for behavior that crosses the boundary and merge the rest"
+            for side, limit in MAX_SCENARIOS.items()
+            if counts[side] > limit
+        ]
+        + [
+            f"ready_to_sign needs a provider scenario with expect_emitted for webhook {name}; the "
+            "provider adds it to prove its test setup delivers the webhook"
+            for name in (webhooks if isinstance(webhooks, Mapping) else {})
+            if name not in emitted
+        ]
+    )
 
 
 def validate_contract_text(text: str, bindings: Sequence[Binding] = ()) -> ValidationReport:

@@ -1,4 +1,4 @@
-FROM node:24-slim AS dashboard
+FROM node:24.22.0-slim@sha256:a5f4366e834695d5f363b920c104953a535d3a9864d1bdf74566a0ebe01daee5 AS dashboard
 
 WORKDIR /dashboard
 COPY dashboard/package.json dashboard/package-lock.json ./
@@ -6,7 +6,7 @@ RUN npm ci
 COPY dashboard ./
 RUN npm run build
 
-FROM python:3.13-slim
+FROM python:3.13.13-slim@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286
 
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
@@ -18,9 +18,10 @@ COPY packages/broker packages/broker
 COPY demo/presets demo/presets
 COPY demo/recordings/certified-run.json demo/recordings/certified-run.json
 COPY config config
+COPY constraints.txt constraints.txt
 COPY --from=dashboard /dashboard/dist dashboard/dist
 
-RUN pip install \
+RUN pip install -c constraints.txt \
     -e packages/llm \
     -e packages/contract \
     -e packages/sandbox \

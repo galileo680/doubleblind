@@ -19,10 +19,10 @@ EGRESS_CLASSIFIER = """You are a data-loss-prevention filter between a company a
 descriptions of interface semantics, JSON schemas, synthetic examples, test scenario descriptions, interface bindings
 (URLs and request shapes). Forbidden: source code, file paths, internal module or class names, stack traces, secrets,
 real personal data, internal hostnames other than declared integration URLs. Decide allow / redact / block for the text below.
-Interface semantics stay allowed even when they are technical: HTTP methods and API paths of the integration (e.g. POST /orders),
-error codes (e.g. ORDER_NOT_PAYABLE), field names, status values, units, protocols (HTTPS, HTTP 2xx), retry and idempotency rules.
+Interface semantics stay allowed even when they are technical: HTTP methods and API paths of the integration (e.g. POST /records),
+error codes (e.g. RECORD_LOCKED), field names, status values, units, protocols (HTTPS, HTTP 2xx), retry and idempotency rules.
 Identifiers of the shared contract are public between the partners: scenario ids (S1, P10, E2), decision ids (D3, H7),
-operation, webhook, action and query names, status mappings (IN_TRANSIT -> shipped). Never redact them.
+operation, webhook, action and query names, status mappings (IN_PROGRESS -> active). Never redact them.
 Redact only fragments that are clearly forbidden; when in doubt, allow. Never redact a fragment only because it is detailed.
 Output JSON matching the schema."""
 
@@ -34,7 +34,7 @@ Rules:
 1. Never include source code, file paths, stack traces, secrets or real personal data in messages or patches.
 2. Every mismatch you detect (units, formats, enums, required headers, limits, error handling, idempotency,
    webhook security) must end as: a decision with an owner + at least one scenario that tests it.
-3. Business choices (e.g. adding a new order status, refusing to ship) are NOT yours to make: ask your human via
+3. Business choices (e.g. adding a new status, refusing a kind of request) are NOT yours to make: ask your human via
    questions_for_human with 2-3 concrete options and a safe default (the default must be one of the options).
    An answered question is settled: turn the answer into a decision and never ask it again.
 4. Patches are RFC 6902 operations on the contract JSON. Keep the contract valid. Use only step types allowed for each side.
@@ -45,7 +45,8 @@ Rules:
    and propose who converts what. Operations, webhooks, schemas and secrets describe the provider's API: only the
    provider changes them; ask for a change in your message.
 7. Before signing the contract needs e2e scenarios (side e2e, ids E<n>) for the main flows across both real systems,
-   e.g. the consumer creates and pays an order, the provider shows the shipment, a status change reaches the consumer.
+   e.g. the consumer creates a record through the provider's API, the provider shows it, a status change reaches
+   the consumer.
    They use do/expect_state of both parties and send; both bindings must later provide the actions they name.
 8. Every scenario tests a different behavior; never add a scenario that repeats an existing one. Scenarios cover only
    behavior that crosses the boundary between the companies and that both systems already have or a human approved:
@@ -73,9 +74,9 @@ schemas {Name: JSON Schema}, operations {id: Operation}, webhooks {id: Webhook},
 decisions [Decision], scenarios [Scenario].
 
 Operation (consumer calls provider): description, direction consumer_to_provider, request {method, path (parameters as {name},
-e.g. /shipments/{id}),
+e.g. /records/{id}),
 headers {Name: {required, pattern?}}, body {$ref: "#/schemas/Name"}}, responses {"201": {body: {$ref}}, "422": {...}},
-stub {default_status, body (example response with templates such as "shp_{{seq}}" or "{{request.body.reference}}"),
+stub {default_status, body (example response with templates such as "rec_{{seq}}" or "{{request.body.reference}}"),
 idempotent_on_header?}. The stub body must validate against the schema of default_status.
 Webhook (provider calls consumer): description, direction provider_to_consumer, request {method, url "${CONSUMER_WEBHOOK_URL}",
 headers, body {$ref}}, signature? {algorithm hmac-sha256, header, format "sha256={hex}", over raw_body, secret <secret name>},
@@ -87,7 +88,7 @@ P<n> for provider and E<n> for e2e scenarios; ids must be unique.
 Steps (one key per step):
 - do {party, action, args?}: runs an action of that party's test binding. consumer side: only party consumer;
   provider side: only party provider; e2e: both. Action names are chosen by the side that implements them later
-  (e.g. reset, create_order, pay_order, create_partner, advance_shipment); captured values land in ctx.
+  (e.g. reset, create_record, create_test_account, advance_status); captured values land in ctx.
 - send {operation, path? {name: value}, query? {name: value}, headers?, body?, expect {status, match?}, capture?}: provider
   and e2e only; calls the provider directly; path gives a value for every {name} in the operation path.
 - emit {webhook, body, signature valid|invalid|missing, expect {status}}: consumer only; the stub sends a webhook.
@@ -95,12 +96,12 @@ Steps (one key per step):
 - expect_no_request {operation?, within_s}: consumer only.
 - expect_emitted {webhook, count?, signature valid, match?, within_s?}: provider only; asserts on webhooks the provider sent.
 - expect_state {party, query, args?, match, eventually? {timeout_s, interval_s}}: all sides, party must fit the side.
-Match: keys are dotted paths (body.parcel.weight_g, headers.Idempotency-Key, status); literal = equality, object = subset;
+Match: keys are dotted paths (body.items.0.quantity, headers.Idempotency-Key, status); literal = equality, object = subset;
 operators {$regex}, {$type}, {$exists}, {$gte}, {$lte}, {$in}, {$contains}, {$any: true}.
 Templates: {{ctx.x}}, {{secrets.name}}, {{capture.url}}, {{now}}, {{uuid}}, {{args.x}}; in stubs also {{request.body.path}},
 {{request.headers.Name}}, {{seq}}. {{capture.url}} is where the consumer receives webhooks in provider and e2e tests; use
 it wherever a step registers a webhook URL (never an env variable, which the tests do not have).
-Capture (in send): {name: JSONPath into the response body}, e.g. capture: {shipment_id: "$.id"}; later steps use {{ctx.shipment_id}}.
+Capture (in send): {name: JSONPath into the response body}, e.g. capture: {record_id: "$.id"}; later steps use {{ctx.record_id}}.
 send has no args; only do and expect_state take args. {{ctx.x}} sees only values captured by earlier steps (a send
 captures for later steps, not for its own match). Every body.* path in a match must be a field of the matching schema.
 Validation: all $ref resolve; steps reference existing operations/webhooks; step types fit the side; ids unique;
@@ -142,7 +143,7 @@ the actions and queries. Never change the application.
 Run contract_tests and look at every failing {side} scenario:
 - a binding mistake (wrong path, action name, capture, start command): fix the binding;
 - the contract describes your system wrongly (a path, field, header, status, error code or limit, or missing setup such as
-  creating a partner or registering a webhook first): correct the contract with patch_contract, a JSON Patch on your
+  creating test credentials or registering a webhook first): correct the contract with patch_contract, a JSON Patch on your
   operations, schemas, webhooks, secrets and {side} scenarios; setup is a do step calling an action of your binding.
 Never remove a scenario or an assertion to make it pass; correct wrong values instead. Run contract_tests after every change.
 Setup your system needs before every scenario (e.g. credentials created with the shared secret, the other side's webhook
@@ -156,7 +157,7 @@ TRIAGE = """You classify a failing contract test report for {party}. Categories:
 (contract is wrong/ambiguous/contradictory), COUNTERPARTY_ISSUE (the other side violates the contract — only possible in e2e),
 ENV_ERROR (infrastructure). In e2e decide from the gateway traffic: the consumer sends operations, the provider sends
 webhooks. A violation in a request we sent is our CODE_BUG. A request without violations that our app rejected or answered
-against the contract is our CODE_BUG, including test data our actions create (partners, credentials, webhook
+against the contract is our CODE_BUG, including test data our actions create (test accounts, credentials, webhook
 registrations) that does not use the contract's secrets or {{{{capture.url}}}}. CONTRACT_GAP when a scenario cannot pass as
 written (e.g. a needed setup step is missing). COUNTERPARTY_ISSUE only when the traffic clearly shows the other side broke
 the contract; when unsure, fix what is ours (CODE_BUG).

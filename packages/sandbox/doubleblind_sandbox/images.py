@@ -6,13 +6,16 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from doubleblind_llm.settings import read_yaml
+from doubleblind_llm.settings import PACKAGE_REPO_ROOT, read_yaml
 from doubleblind_sandbox.provider import REPO_DIR, SandboxError, SandboxProvider
 
 TOOLS_DIR = "/opt/doubleblind"
 RECIPE_PATH = f"{TOOLS_DIR}/recipe.sh"
 WHEELS_DIR = f"{TOOLS_DIR}/wheels"
-BASE_IMAGES = {"tokenfactory": "tag:python:3.13-slim", "docker": "tag:python:3.13.13-slim"}
+PINNED_PYTHON = (
+    "python:3.13.13-slim@sha256:aa938a849bcb82dce8f49480f056ab82bf5c1c3ebc294f0430f37b6820e7f286"
+)
+BASE_IMAGES = {"tokenfactory": "tag:python:3.13-slim", "docker": f"tag:{PINNED_PYTHON}"}
 BUILD_TIMEOUT_S = 1500
 SKIPPED_PARTS = frozenset(
     {
@@ -29,13 +32,14 @@ SKIPPED_SUFFIXES = (".db", ".pyc")
 CONFIG_FILE = "doubleblind.yaml"
 SKIPPED_NAMES = frozenset({"doubleblind.binding.e2e.yaml", CONFIG_FILE})
 NODE_INSTALLER = Path(__file__).with_name("install_node.py")
+CONSTRAINTS = PACKAGE_REPO_ROOT / "constraints.txt"
 RECIPE = """set -eu
 export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
-export PIP_DISABLE_PIP_VERSION_CHECK=1
+export PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PIP_ROOT_USER_ACTION=ignore
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends git ripgrep ca-certificates xz-utils > /dev/null
-pip install --quiet --no-cache-dir --root-user-action=ignore {wheels}/*.whl
+pip install --quiet -c {tools}/constraints.txt {wheels}/*.whl
 git config --global user.email agent@doubleblind.local
 git config --global user.name "DoubleBlind agent"
 git config --global init.defaultBranch main
@@ -57,10 +61,12 @@ class BasePlan:
 
 def repo_plan(party: str, repo_dir: Path) -> BasePlan:
     install = read_yaml(repo_dir / CONFIG_FILE)["install"].strip()
-    recipe = RECIPE.format(wheels=WHEELS_DIR, repo=REPO_DIR, install=install)
-    return BasePlan(
-        party, repo_dir, recipe.encode(), {f"{TOOLS_DIR}/install_node.py": NODE_INSTALLER}
-    )
+    recipe = RECIPE.format(tools=TOOLS_DIR, wheels=WHEELS_DIR, repo=REPO_DIR, install=install)
+    tools = {
+        f"{TOOLS_DIR}/install_node.py": NODE_INSTALLER,
+        f"{TOOLS_DIR}/constraints.txt": CONSTRAINTS,
+    }
+    return BasePlan(party, repo_dir, recipe.encode(), tools)
 
 
 def contract_wheel(package_dir: Path) -> tuple[dict[str, bytes], str]:

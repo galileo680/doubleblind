@@ -1,5 +1,5 @@
 install: |
-  python /opt/doubleblind/install_node.py 24
+  python /opt/doubleblind/install_node.py 24.22.0
   npm ci --no-audit --no-fund --loglevel=error
   printf 'node_modules\n' > .gitignore
 synthetic_test_data:
