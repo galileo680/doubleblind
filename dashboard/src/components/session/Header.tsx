@@ -5,6 +5,7 @@ import { navigate, sessionPath } from "../../state/route";
 import { OBSERVER, useSessionContext } from "../../state/session";
 import { shareLink } from "../../state/sessions";
 import { Badge, CodeShared, Segmented, StateBadge, Swatch } from "../ui";
+import { StageBar } from "./StageBar";
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -184,6 +185,7 @@ export function SessionHeader() {
           {stored && <CopyButton text={shareLink(stored)} label="Copy link" />}
         </div>
       </div>
+      <StageBar />
       <div className="row wrap" style={{ gap: 20 }}>
         <div className="metrics">
           <div>
