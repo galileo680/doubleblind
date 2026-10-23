@@ -4,13 +4,14 @@ import { AuthPage } from "./pages/AuthPage";
 import { CertificatePage } from "./pages/CertificatePage";
 import { ContractPage } from "./pages/ContractPage";
 import { GatewayPage } from "./pages/GatewayPage";
-import { HomePage } from "./pages/HomePage";
 import { IntegrationPage } from "./pages/IntegrationPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { InvitePage } from "./pages/InvitePage";
+import { LandingPage } from "./pages/LandingPage";
 import { IsolationPage } from "./pages/IsolationPage";
 import { PresentationPage } from "./pages/PresentationPage";
 import { SessionPage } from "./pages/SessionPage";
+import { SessionsPage } from "./pages/SessionsPage";
 import { useAccount } from "./state/account";
 import { authPath, useRoute, type Route, type SessionTab } from "./state/route";
 import { SessionScope, useSessionContext } from "./state/session";
@@ -52,7 +53,9 @@ function SessionRoute({ tab }: { tab: SessionTab }) {
 function TopPage({ route }: { route: Exclude<Route, { page: "session" }> }) {
   switch (route.page) {
     case "home":
-      return <HomePage />;
+      return <LandingPage />;
+    case "sessions":
+      return <SessionsPage />;
     case "login":
     case "signup":
       return <AuthPage key={route.page} mode={route.page} next={route.next} />;

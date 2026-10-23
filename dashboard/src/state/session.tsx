@@ -47,6 +47,8 @@ export interface SessionContextValue {
   data: SessionData;
   now: number;
   replay: ReplayControls;
+  simulated: boolean;
+  canAct: boolean;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -63,7 +65,9 @@ export function useOptionalSession(): SessionContextValue | null {
 
 function tokenFor(stored: StoredSession | undefined, view: string): string | null {
   if (!stored) return null;
-  return view === OBSERVER ? (stored.observer ?? null) : (stored.humans[view] ?? null);
+  return view === OBSERVER
+    ? (stored.observer ?? null)
+    : (stored.humans[view] ?? stored.observer ?? null);
 }
 
 function initialView(id: string, stored: StoredSession | undefined): string {
@@ -105,6 +109,7 @@ export function SessionScope({
   const live = useSessionData(id, token, token !== null || cookie);
   const recorded = live.session?.recorded ?? false;
   const shownView = cookie ? (live.session?.you ?? OBSERVER) : view;
+  const simulated = !cookie && shownView !== OBSERVER && !stored?.humans[shownView];
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), recorded ? 250 : 1000);
@@ -113,7 +118,7 @@ export function SessionScope({
 
   const [position, setPosition] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<ReplaySpeed>("normal");
+  const [speed, setSpeed] = useState<ReplaySpeed>(params.get("replay") === "1" ? "fast" : "normal");
   const total = live.events.length;
   const autoplay = useRef(params.get("replay") === "1");
 
@@ -143,15 +148,24 @@ export function SessionScope({
     : position;
 
   const data = useMemo<SessionData>(() => {
-    if (shown === null) return live;
-    const events = live.events.slice(0, shown);
+    const seen = (visibility: string) =>
+      !simulated || visibility === "shared" || visibility === shownView;
+    if (shown === null) {
+      if (!simulated) return live;
+      return {
+        ...live,
+        events: live.events.filter((event) => seen(event.visibility)),
+        questions: live.questions.filter((question) => question.party === shownView),
+      };
+    }
+    const events = live.events.slice(0, shown).filter((event) => seen(event.visibility));
     return {
       ...live,
       events,
       session: live.session ? replaySession(live.session, events) : null,
       questions: replayQuestions(events),
     };
-  }, [live, shown]);
+  }, [live, shown, simulated, shownView]);
 
   const replay: ReplayControls = {
     active: shown !== null,
@@ -196,7 +210,9 @@ export function SessionScope({
         value: party.party,
         label: party.display_name,
         tone: roleTone(party.role),
-        disabled: cookie ? party.party !== shownView : !stored?.humans[party.party],
+        disabled: cookie
+          ? party.party !== shownView
+          : !stored?.humans[party.party] && !stored?.observer,
       })),
       {
         value: OBSERVER,
@@ -223,6 +239,8 @@ export function SessionScope({
         data,
         now: shownNow,
         replay,
+        simulated,
+        canAct: !recorded && !simulated,
       }}
     >
       {children}

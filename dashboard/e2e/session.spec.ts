@@ -25,7 +25,7 @@ test("a human creates a session, answers the agents' questions and signs both si
 }) => {
   let agents: ChildProcess | null = null;
   try {
-    await page.goto("/");
+    await page.goto("/#/sessions");
     await page.getByLabel("Session name").fill("Playwright · Spokes ↔ Parcelly");
     await page.getByRole("button", { name: "Create and start" }).click();
     await expect(page.getByTestId("session-page")).toBeVisible();
@@ -81,7 +81,7 @@ test("a human creates a session, answers the agents' questions and signs both si
     });
     expect(published.ok()).toBeTruthy();
     await page.evaluate(() => localStorage.removeItem("doubleblind.sessions"));
-    await page.goto("/");
+    await page.goto("/#/sessions");
     const listed = page.getByTestId("public-sessions");
     await expect(listed).toContainText("Playwright · Spokes ↔ Parcelly");
     await listed.getByRole("button", { name: "▶ Watch replay" }).click();

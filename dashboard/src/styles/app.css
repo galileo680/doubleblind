@@ -1432,6 +1432,48 @@ textarea.input {
   color: var(--fg);
   white-space: pre-wrap;
 }
+.landing-hero h1 {
+  margin: 12px 0 8px;
+  max-width: 920px;
+  font-size: 30px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+.landing-hero p {
+  max-width: 860px;
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.landing-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 32px;
+  margin-top: 20px;
+}
+.landing-fact .value {
+  font: 600 24px var(--mono);
+  color: var(--o);
+}
+.landing-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+.landing-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 22px;
+}
+.landing-card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.landing-card p {
+  margin: 0;
+}
 .auth-card {
   width: 100%;
   max-width: 420px;

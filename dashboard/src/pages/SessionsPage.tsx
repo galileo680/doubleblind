@@ -235,7 +235,7 @@ function OpenLink() {
   );
 }
 
-export function HomePage() {
+export function SessionsPage() {
   const sessions = useStoredSessions();
   const views = useSessionViews(sessions);
   const [group, setGroup] = useState<Group>("all");

@@ -5,6 +5,7 @@ export type SessionTab = (typeof SESSION_TABS)[number];
 
 export type Route =
   | { page: "home" }
+  | { page: "sessions" }
   | { page: "login"; next: string }
   | { page: "signup"; next: string }
   | { page: "integrations" }
@@ -26,6 +27,7 @@ export function parseRoute(hash: string): Route {
   if (parts[0] === "login" || parts[0] === "signup")
     return { page: parts[0], next: params.get("next") ?? "#/integrations" };
   if (parts[0] === "integrations") return { page: "integrations" };
+  if (parts[0] === "sessions") return { page: "sessions" };
   if (parts[0] === "i" && parts[1])
     return { page: "integration", id: decodeURIComponent(parts[1]) };
   if (parts[0] === "invite" && parts[1]) return { page: "invite", token: parts[1] };

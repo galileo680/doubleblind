@@ -91,6 +91,7 @@ export function Shell({
   children: ReactNode;
 }) {
   const wide = !useNarrow(1200);
+  const signedIn = useAccount().status === "signed-in";
   const scope = useOptionalSession();
   const session = scope?.data.session;
   const name = session?.name ?? scope?.stored?.name ?? scope?.id;
@@ -112,14 +113,16 @@ export function Shell({
         <nav className="nav">
           <div className="nav-group">
             {wide && <span className="label">Workspace</span>}
-            <NavItem
-              href="#/integrations"
-              label="Integrations"
-              glyph="IN"
-              on={route.page === "integrations" || route.page === "integration"}
-              wide={wide}
-            />
-            <NavItem href="#/" label="Sessions" glyph="SE" on={route.page === "home"} wide={wide} />
+            <NavItem href="#/" label="Home" glyph="HO" on={route.page === "home"} wide={wide} />
+            {signedIn && (
+              <NavItem
+                href="#/integrations"
+                label="Integrations"
+                glyph="IN"
+                on={route.page === "integrations" || route.page === "integration"}
+                wide={wide}
+              />
+            )}
           </div>
           {route.page === "session" && (
             <div className="nav-group">
@@ -155,10 +158,14 @@ export function Shell({
       <main className="main">
         <header className="topbar">
           <div className="crumbs">
-            {route.page === "integrations" || route.page === "integration" ? (
+            {route.page === "sessions" ? (
+              <a href="#/sessions">Sessions</a>
+            ) : route.page === "integrations" ||
+              route.page === "integration" ||
+              (route.page === "session" && !scope?.stored) ? (
               <a href="#/integrations">Integrations</a>
             ) : (
-              <a href="#/">Sessions</a>
+              <a href="#/">DoubleBlind</a>
             )}
             {route.page === "session" && (
               <>

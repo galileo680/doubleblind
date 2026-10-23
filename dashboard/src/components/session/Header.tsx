@@ -71,6 +71,7 @@ export function ReplayBar() {
     <div className="row" data-testid="replay-bar">
       {replay.active ? (
         <>
+          <Badge tone="w">Recorded run</Badge>
           <button type="button" className="btn btn-sm" onClick={replay.toggle}>
             {replay.playing ? "Pause" : replay.position >= replay.total ? "Replay again" : "Play"}
           </button>
@@ -107,7 +108,8 @@ export function ReplayBar() {
 }
 
 export function SessionHeader() {
-  const { id, stored, view, setView, viewOptions, data, now } = useSessionContext();
+  const { id, stored, view, setView, viewOptions, data, now, simulated, ownParty } =
+    useSessionContext();
   const session = data.session;
   const events = data.events;
   const probes = probeResults(events);
@@ -239,6 +241,13 @@ export function SessionHeader() {
           <b>READ-ONLY</b>
           Observer view: shared data from both companies, costs and the audit trail — never either
           side's internals.
+        </div>
+      )}
+      {simulated && ownParty && (
+        <div className="alert" data-testid="company-view">
+          <b>COMPANY VIEW</b>
+          Exactly what {ownParty.display_name} sees in this run: its own private data and the shared
+          contract, never the other company's internals.
         </div>
       )}
       {data.error && <div className="alert alert-error">{data.error}</div>}

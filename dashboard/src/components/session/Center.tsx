@@ -317,7 +317,7 @@ export function ContractTabs() {
 }
 
 export function SignaturesBar() {
-  const { id, token, view, data, replay } = useSessionContext();
+  const { id, token, view, data, canAct } = useSessionContext();
   const session = data.session;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -352,7 +352,7 @@ export function SignaturesBar() {
         {session.parties.map((party) => {
           const done =
             signed.has(party.party) || (!awaiting && session.signed_contract_version === version);
-          const canSign = awaiting && !done && view === party.party && !replay.recorded;
+          const canSign = awaiting && !done && view === party.party && canAct;
           return (
             <div key={party.party} className={`sig${canSign ? " need" : ""}`}>
               <Swatch tone={roleTone(party.role)} />

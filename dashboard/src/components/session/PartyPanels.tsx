@@ -143,7 +143,7 @@ function SystemModel({ party }: { party: PartyView }) {
 }
 
 function QuestionCard({ question, canAnswer }: { question: Question; canAnswer: boolean }) {
-  const { id, token, data, replay } = useSessionContext();
+  const { id, token, data, canAct } = useSessionContext();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const open = !question.answer;
@@ -181,7 +181,7 @@ function QuestionCard({ question, canAnswer }: { question: Question; canAnswer: 
               {option === question.default && <span className="rec">DEFAULT</span>}
             </button>
           ))}
-          {!canAnswer && !replay.recorded && (
+          {!canAnswer && canAct && (
             <span className="muted">Switch “View as” to this company to answer.</span>
           )}
           {error && <span className="field-error">{error}</span>}
@@ -374,7 +374,7 @@ export function PartyColumn({
   own: boolean;
   position: "first" | "last";
 }) {
-  const { data, view, replay } = useSessionContext();
+  const { data, view, canAct } = useSessionContext();
   const session = data.session;
   if (!session) return null;
   const tone = roleTone(party.role);
@@ -394,7 +394,7 @@ export function PartyColumn({
       {own ? (
         <>
           <SystemModel party={party} />
-          <Questions party={party} canAnswer={view === party.party && !replay.recorded} />
+          <Questions party={party} canAnswer={view === party.party && canAct} />
           <Implementation party={party} />
         </>
       ) : (
