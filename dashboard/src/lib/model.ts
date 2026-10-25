@@ -388,21 +388,42 @@ export function matrix(
   }));
 }
 
+export const ROLE_TASK: Record<string, string> = {
+  psm: "maps its company's code",
+  brief: "writes the brief",
+  negotiator: "negotiates the contract",
+  negotiator_fix: "fixes rejected contract drafts",
+  coder: "writes the code",
+  triage: "diagnoses failing tests",
+  guard: "checks for leaks",
+  repair: "repairs malformed JSON",
+  human_sim: "answers for the company",
+};
+
+export interface ModelUse {
+  cost: number;
+  calls: number;
+  roles: Map<string, number>;
+}
+
 export function costs(events: BrokerEvent[]) {
-  const models = new Map<string, number>();
-  const roles = new Map<string, number>();
+  const models = new Map<string, ModelUse>();
   const sandboxes = new Map<string, number>();
   for (const event of ofType(events, "llm.call", "sandbox.cost")) {
     const data = payload<{ model?: string; role?: string; party: string; cost_usd: number }>(event);
     if (event.type === "llm.call") {
-      models.set(data.model ?? "model", (models.get(data.model ?? "model") ?? 0) + data.cost_usd);
-      const key = `${data.party} · ${data.role ?? "agent"}`;
-      roles.set(key, (roles.get(key) ?? 0) + data.cost_usd);
+      const name = (data.model ?? "model").replace(/^nvidia\//, "");
+      const use = models.get(name) ?? { cost: 0, calls: 0, roles: new Map() };
+      use.cost += data.cost_usd;
+      use.calls += 1;
+      const role = data.role ?? "agent";
+      use.roles.set(role, (use.roles.get(role) ?? 0) + data.cost_usd);
+      models.set(name, use);
     } else {
       sandboxes.set(data.party, (sandboxes.get(data.party) ?? 0) + data.cost_usd);
     }
   }
-  return { models, roles, sandboxes };
+  return { models, sandboxes };
 }
 
 export interface PsmStats {

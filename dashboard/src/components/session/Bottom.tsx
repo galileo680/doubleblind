@@ -3,6 +3,8 @@ import { bytes, clock, usd } from "../../lib/format";
 import {
   costs,
   matrix,
+  ROLE_TASK,
+  type ModelUse,
   ofType,
   partyName,
   timeline,
@@ -280,6 +282,35 @@ function BarRows({ rows, tone }: { rows: [string, number][]; tone: string }) {
   );
 }
 
+function ModelRows({ models }: { models: Map<string, ModelUse> }) {
+  const rows = [...models.entries()].sort((a, b) => b[1].cost - a[1].cost);
+  const max = Math.max(...rows.map(([, use]) => use.cost), 0.0001);
+  return (
+    <>
+      {rows.map(([name, use]) => (
+        <div key={name} className="stack" style={{ gap: 3 }}>
+          <div className="bar-row">
+            <span className="ellipsis mono">{name}</span>
+            <div className="bar">
+              <div style={{ width: `${(use.cost / max) * 100}%`, background: "var(--a)" }} />
+            </div>
+            <span className="mono" style={{ textAlign: "right" }}>
+              {usd(use.cost, use.cost < 0.1 ? 4 : 2)}
+            </span>
+          </div>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {[...use.roles.entries()]
+              .sort((a, b) => b[1] - a[1])
+              .map(([role]) => ROLE_TASK[role] ?? role)
+              .join(" · ")}{" "}
+            · {use.calls} calls
+          </span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function CostPanel() {
   const { data, view } = useSessionContext();
   const metrics = data.session?.metrics;
@@ -319,9 +350,9 @@ export function CostPanel() {
         {observer ? (
           <>
             <div className="stack" style={{ gap: 7 }}>
-              <span className="label">By model</span>
+              <span className="label">Which Nemotron does what</span>
               {breakdown.models.size ? (
-                <BarRows rows={sorted(breakdown.models)} tone="var(--a)" />
+                <ModelRows models={breakdown.models} />
               ) : (
                 <span className="muted">No model calls yet.</span>
               )}
