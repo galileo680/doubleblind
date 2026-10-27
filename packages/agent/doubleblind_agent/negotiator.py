@@ -393,7 +393,9 @@ async def propose_turn(
             update={"message": f"{turn.message}\n(Not applied: {'; '.join(sorted(dropped))}.)"}
         )
     if patch_errors(context["contract"], turn):
-        turn = valid_subset(context["contract"], turn).model_copy(
+        turn = valid_subset(
+            context["contract"], turn.model_copy(update={"status": "continue"})
+        ).model_copy(
             update={
                 "status": "continue",
                 "message": f"{turn.message}\n(Some of my contract changes in this turn did not "
