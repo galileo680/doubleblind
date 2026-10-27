@@ -1,3 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "doubleblind"
+version = "0.1.0"
+description = "DoubleBlind agent: connects one company's repository to a DoubleBlind integration"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = [
+  "openai>=1.50",
+  "httpx>=0.27",
+  "pydantic>=2.8",
+  "tenacity>=9.0",
+  "pyyaml>=6.0",
+  "jsonschema>=4.23",
+  "jsonpatch>=1.33",
+  "jsonpath-ng>=1.6",
+  "ruamel.yaml>=0.18",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "typer>=0.12",
+  "rich>=13.8",
+]
+
+[project.scripts]
+doubleblind = "doubleblind_agent.connect:main"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "packages/agent/doubleblind_agent",
+  "packages/llm/doubleblind_llm",
+  "packages/sandbox/doubleblind_sandbox",
+  "packages/contract/doubleblind_contract",
+]
+
+[tool.hatch.build.targets.wheel.force-include]
+"config" = "doubleblind_bundle/config"
+"constraints.txt" = "doubleblind_bundle/constraints.txt"
+"packages/contract/pyproject.toml" = "doubleblind_bundle/packages/contract/pyproject.toml"
+"packages/contract/doubleblind_contract" = "doubleblind_bundle/packages/contract/doubleblind_contract"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

@@ -8,7 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from doubleblind_llm.errors import ConfigurationError
 
 MODE_ENV = "DOUBLEBLIND_LLM_MODE"
-PACKAGE_REPO_ROOT = Path(__file__).resolve().parents[3]
+HERE = Path(__file__).resolve()
+SOURCE_ROOT = HERE.parents[3]
+INSTALLED = not (SOURCE_ROOT / "config").is_dir()
+BUNDLE_ROOT = HERE.parents[1] / "doubleblind_bundle" if INSTALLED else SOURCE_ROOT
+PACKAGE_REPO_ROOT = Path.home() / ".doubleblind" if INSTALLED else SOURCE_ROOT
 
 Mode = Literal["live", "record", "replay"]
 ThinkingSetting = Literal["on", "off"]
@@ -73,7 +77,7 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def load_settings(config_dir: Path | None = None) -> LLMSettings:
-    directory = config_dir or PACKAGE_REPO_ROOT / "config"
+    directory = config_dir or BUNDLE_ROOT / "config"
     models_file = read_yaml(directory / "models.yaml")
     pricing_file = read_yaml(directory / "pricing.yaml")
     models = {

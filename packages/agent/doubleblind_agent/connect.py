@@ -9,12 +9,13 @@ from pathlib import Path
 import httpx
 
 from doubleblind_agent.main import PATCH_FILE, PartyConfig, PartyRuntime
-from doubleblind_llm.settings import PACKAGE_REPO_ROOT, load_dotenv, read_yaml
+from doubleblind_llm.settings import BUNDLE_ROOT, load_dotenv, read_yaml
 from doubleblind_sandbox.environment import remote_sandbox
 from doubleblind_sandbox.images import CONFIG_FILE, contract_wheel, ensure_base_image, repo_plan
 
 POLL_S = 5.0
-CONTRACT_PACKAGE = PACKAGE_REPO_ROOT / "packages" / "contract"
+CONTRACT_PACKAGE = BUNDLE_ROOT / "packages" / "contract"
+COMPANY_KEYS = ("NEBIUS_API_KEY", "NEBIUS_PROJECT_ID")
 
 
 def git(repo: Path, *arguments: str) -> str | None:
@@ -71,8 +72,12 @@ def run_session(broker: str, key: str, session: dict[str, str], base: str, kind:
 
 
 def connect(broker: str, key: str) -> None:
-    load_dotenv(PACKAGE_REPO_ROOT / ".env")
     repo, kind = Path.cwd(), os.environ.get("DOUBLEBLIND_SANDBOX", "tokenfactory")
+    load_dotenv(repo / ".env")
+    missing = [name for name in COMPANY_KEYS if not os.environ.get(name)]
+    if missing:
+        names = " and ".join(missing)
+        raise SystemExit(f"put {names} of your company's Token Factory account in {repo / '.env'}")
     synthetic = read_yaml(repo / CONFIG_FILE).get("synthetic_test_data", {})
     print(f"building the base image of {repo.name} in {kind} sandboxes")
     base = asyncio.run(build_base(repo, kind))

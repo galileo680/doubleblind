@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from doubleblind_llm.settings import PACKAGE_REPO_ROOT, read_yaml
+from doubleblind_llm.settings import BUNDLE_ROOT, read_yaml
 from doubleblind_sandbox.provider import REPO_DIR, SandboxError, SandboxProvider
 
 TOOLS_DIR = "/opt/doubleblind"
@@ -30,9 +30,9 @@ SKIPPED_PARTS = frozenset(
 )
 SKIPPED_SUFFIXES = (".db", ".pyc")
 CONFIG_FILE = "doubleblind.yaml"
-SKIPPED_NAMES = frozenset({"doubleblind.binding.e2e.yaml", CONFIG_FILE})
+SKIPPED_NAMES = frozenset({"doubleblind.binding.e2e.yaml", CONFIG_FILE, ".env"})
 NODE_INSTALLER = Path(__file__).with_name("install_node.py")
-CONSTRAINTS = PACKAGE_REPO_ROOT / "constraints.txt"
+CONSTRAINTS = BUNDLE_ROOT / "constraints.txt"
 RECIPE = """set -eu
 export DEBIAN_FRONTEND=noninteractive
 export HOME=/root

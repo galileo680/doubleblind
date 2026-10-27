@@ -267,6 +267,22 @@ export function IntegrationPage({ id }: { id: string }) {
             Your agent runs on your side, next to your code, and builds your half of the
             integration. Your code never leaves your company.
           </span>
+          <ol className="fg2" style={{ margin: 0, paddingLeft: 20 }}>
+            <li>
+              Install the agent once:{" "}
+              <span className="mono">
+                pipx install git+https://github.com/galileo680/doubleblind
+              </span>
+            </li>
+            <li>
+              In your repository, put <span className="mono">NEBIUS_API_KEY</span> and{" "}
+              <span className="mono">NEBIUS_PROJECT_ID</span> of your Token Factory account in{" "}
+              <span className="mono">.env</span>, and how to install your app in{" "}
+              <span className="mono">doubleblind.yaml</span>. Your company pays for its own models
+              and sandboxes.
+            </li>
+            <li>Generate a key and run the command it gives you in your repository.</li>
+          </ol>
           {mine?.online && (
             <span>
               Your agent is online in <span className="mono">{mine.repo}</span> at commit{" "}
