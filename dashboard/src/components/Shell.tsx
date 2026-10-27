@@ -8,7 +8,6 @@ const SESSION_NAV: [SessionTab, string, string][] = [
   ["dashboard", "Session dashboard", "SD"],
   ["contract", "Contract", "CO"],
   ["e2e", "End-to-end", "E2"],
-  ["isolation", "Isolation proof", "IP"],
   ["certificate", "Certificate", "CE"],
 ];
 

@@ -5,7 +5,6 @@ import type {
   CreatedSession,
   Integration,
   InvitePreview,
-  ProbeReport,
   PublicSession,
   Question,
   Role,
@@ -88,11 +87,6 @@ export const api = {
     }),
   newAgentKey: (id: string) =>
     request<{ agent_key: string }>(`${integration(id)}/agent-key`, null, { method: "POST" }),
-  startDemo: (id: string, speed: number) =>
-    request<{ session_id: string }>(`${integration(id)}/demo`, null, {
-      method: "POST",
-      body: JSON.stringify({ speed }),
-    }),
   startLive: (id: string) =>
     request<{ session_id: string }>(`${integration(id)}/start`, null, { method: "POST" }),
   stopLive: (id: string) => request<unknown>(`${integration(id)}/stop`, null, { method: "POST" }),
@@ -130,8 +124,6 @@ export const api = {
     }),
   certificate: (id: string, token: string | null) =>
     request<Certificate>(`${session(id)}/certificate`, token),
-  isolationProbe: (id: string, token: string) =>
-    request<ProbeReport>(`${session(id)}/isolation-probe`, token, { method: "POST" }),
 };
 
 const tokenParam = (token: string | null) => (token ? `&token=${encodeURIComponent(token)}` : "");

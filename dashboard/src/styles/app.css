@@ -315,26 +315,6 @@ textarea.input {
   margin-top: 2px;
 }
 
-.code-shared {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--t);
-  background: var(--tb);
-  color: var(--t);
-}
-.code-shared .label-inline {
-  font: 500 10.5px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.code-shared .value {
-  font: 600 15px var(--mono);
-}
-
 .locked {
   position: relative;
   border: 1px solid var(--line);
@@ -1640,81 +1620,6 @@ textarea.input {
   color: var(--t);
 }
 
-.iso-diagram {
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--s1);
-  padding: 22px;
-  display: grid;
-  grid-template-columns: minmax(200px, 1fr) minmax(150px, 220px) minmax(200px, 1fr);
-}
-.iso-box {
-  border: 1.5px dashed var(--t);
-  border-radius: 10px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: var(--tb);
-}
-.iso-item {
-  padding: 7px 10px;
-  border-radius: 7px;
-  background: var(--s1);
-  border: 1px solid var(--line);
-  font-size: 12.5px;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-.iso-item span:last-child {
-  font: 11px var(--mono);
-  color: var(--fg3);
-}
-.iso-mid {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  position: relative;
-}
-.iso-mid::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1.5px;
-  background: var(--line2);
-}
-.iso-mid > * {
-  position: relative;
-  z-index: 1;
-}
-.iso-gate {
-  padding: 10px 12px;
-  border-radius: 9px;
-  border: 1px solid var(--line2);
-  background: var(--s2);
-  text-align: center;
-  width: 100%;
-}
-.iso-flow {
-  font: 500 11px var(--mono);
-  background: var(--s1);
-  padding: 0 6px;
-}
-@media (max-width: 760px) {
-  .iso-diagram {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-  .iso-mid::before {
-    display: none;
-  }
-}
 .pill {
   display: flex;
   gap: 8px;

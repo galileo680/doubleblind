@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { duration, usd } from "../../lib/format";
-import { elapsedMs, probeResults, roleTone } from "../../lib/model";
+import { elapsedMs, roleTone } from "../../lib/model";
 import { navigate, sessionPath } from "../../state/route";
 import { OBSERVER, useSessionContext } from "../../state/session";
 import { shareLink } from "../../state/sessions";
-import { Badge, CodeShared, Segmented, StateBadge, Swatch } from "../ui";
+import { Badge, Segmented, StateBadge, Swatch } from "../ui";
 import { StageBar } from "./StageBar";
 
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
@@ -113,7 +113,6 @@ export function SessionHeader() {
     useSessionContext();
   const session = data.session;
   const events = data.events;
-  const probes = probeResults(events);
   const metrics = session?.metrics;
   const cost = metrics ? metrics.cost_usd + (metrics.sandbox_cost_usd ?? 0) : 0;
   const version = session?.signed_contract_version ?? session?.current_contract_version;
@@ -123,9 +122,6 @@ export function SessionHeader() {
   const e2e = tests
     ? ((tests.payload.report as { scenarios?: { status: string }[] }).scenarios ?? [])
     : [];
-  const probeLabel = probes
-    ? `${probes.results.filter((item) => item.status === "passed").length}/${probes.results.length}`
-    : "run";
 
   return (
     <div className="session-head">
@@ -158,23 +154,6 @@ export function SessionHeader() {
           )}
         </div>
         <div className="row wrap">
-          <CodeShared lines={metrics?.code_lines_shared ?? 0} />
-          <button
-            type="button"
-            className="btn btn-lg"
-            onClick={() => navigate(sessionPath(id, "isolation"))}
-          >
-            <span
-              style={{ width: 10, height: 10, border: "1.5px solid var(--o)", borderRadius: 2 }}
-            />
-            Isolation proof
-            <span
-              className="mono"
-              style={{ fontSize: 11, color: probes?.ok === false ? "var(--e)" : "var(--o)" }}
-            >
-              {probeLabel}
-            </span>
-          </button>
           <button
             type="button"
             className="btn btn-lg"

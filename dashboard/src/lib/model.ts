@@ -556,17 +556,3 @@ export function elapsedMs(
       : now;
   return end - new Date(first.ts).getTime();
 }
-
-export function probeResults(events: BrokerEvent[]) {
-  const last = ofType(events, "isolation.probe").at(-1);
-  return last
-    ? {
-        ts: last.ts,
-        seq: last.seq,
-        ...payload<{
-          ok: boolean;
-          results: { name: string; expected: string; actual: string; status: string }[];
-        }>(last),
-      }
-    : null;
-}

@@ -195,15 +195,6 @@ export function Kpi({
   );
 }
 
-export function CodeShared({ lines, large = false }: { lines: number; large?: boolean }) {
-  return (
-    <div className={`code-shared tone-${lines === 0 ? "o" : "e"}${large ? " large" : ""}`}>
-      <span className="label-inline">Code shared</span>
-      <span className="value">{lines} lines</span>
-    </div>
-  );
-}
-
 export function Logo({ size = 16 }: { size?: number }) {
   return (
     <span className="logo" style={{ width: size * 1.45, height: size }} aria-hidden>

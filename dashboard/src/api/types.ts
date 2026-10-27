@@ -115,20 +115,6 @@ export interface Certificate {
   metrics: Metrics;
 }
 
-export type ProbeStatus = "passed" | "failed" | "skipped";
-
-export interface ProbeResult {
-  name: string;
-  expected: string;
-  actual: string;
-  status: ProbeStatus;
-}
-
-export interface ProbeReport {
-  ok: boolean;
-  results: ProbeResult[];
-}
-
 export interface PublicSession {
   session_id: string;
   name: string;

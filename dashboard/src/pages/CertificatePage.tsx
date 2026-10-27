@@ -3,7 +3,7 @@ import { api, certificateHtmlUrl } from "../api/client";
 import type { Certificate, CertificateRun, ScenarioRun, TestResult } from "../api/types";
 import { Empty, Label, Logo, Skeleton, Swatch } from "../components/ui";
 import { dateTime, duration, shortHash, usd } from "../lib/format";
-import { elapsedMs, ofType, probeResults, roleTone } from "../lib/model";
+import { elapsedMs, ofType, roleTone } from "../lib/model";
 import { useSessionContext } from "../state/session";
 
 function runResults(run: CertificateRun | undefined): { id: string; status: string }[] {
@@ -66,7 +66,6 @@ export function CertificatePage() {
   const all = [...runs.consumer, ...runs.provider, ...runs.e2e];
   const passed = all.filter((item) => item.status === "passed").length;
   const issuedEvent = ofType(data.events, "certificate.issued").at(-1);
-  const probes = probeResults(data.events);
   const signatures = ofType(data.events, "signature.added").filter(
     (event) => event.payload.version === certificate.signed_contract_version,
   );
@@ -185,15 +184,6 @@ export function CertificatePage() {
               requests within contract · {certificate.gateway.refused} off-contract refused ·{" "}
               {certificate.gateway.schema_violations} violations
             </div>
-          </div>
-          <div>
-            <Label>Isolation probes</Label>
-            <div className="v" style={{ color: probes?.ok === false ? "var(--e)" : "var(--o)" }}>
-              {probes
-                ? `${probes.results.filter((item) => item.status === "passed").length}/${probes.results.length}`
-                : "—"}
-            </div>
-            <div className="muted">{probes ? dateTime(probes.ts) : "not run in this session"}</div>
           </div>
         </div>
         <div
@@ -320,8 +310,8 @@ export function CertificatePage() {
             <span style={{ fontWeight: 500 }}>lines of code shared</span>
           </div>
           <span className="muted grow" style={{ fontSize: 12.5, minWidth: 240 }}>
-            Only the contract, test results and isolation probe results crossed the company
-            boundary. {certificate.metrics.blocked_count} outbound messages were blocked and{" "}
+            Only the contract and test results crossed the company boundary.{" "}
+            {certificate.metrics.blocked_count} outbound messages were blocked and{" "}
             {certificate.metrics.redacted_count} redacted by the egress guard.
           </span>
         </div>

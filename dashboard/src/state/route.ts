@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export const SESSION_TABS = ["dashboard", "contract", "e2e", "isolation", "certificate"] as const;
+export const SESSION_TABS = ["dashboard", "contract", "e2e", "certificate"] as const;
 export type SessionTab = (typeof SESSION_TABS)[number];
 
 export type Route =

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, errorText } from "../api/client";
 import type { Integration, Role } from "../api/types";
 import { CopyButton } from "../components/session/Header";
-import { Badge, Card, CardHead, Segmented, Spinner, StateBadge } from "../components/ui";
+import { Badge, Card, CardHead, Spinner, StateBadge } from "../components/ui";
 import { dateTime } from "../lib/format";
 import { otherRole, ROLE_TEXT } from "../lib/model";
 import { useAccount } from "../state/account";
@@ -10,7 +10,6 @@ import { integrationPath, navigate, sessionPath } from "../state/route";
 import { SignInFirst } from "./IntegrationsPage";
 
 const REFRESH_MS = 4000;
-const DEMO_SPEEDS = ["1", "5", "20"] as const;
 
 function Secret({ text, note }: { text: string; note: string }) {
   return (
@@ -136,7 +135,6 @@ export function IntegrationPage({ id }: { id: string }) {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [agentKey, setAgentKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [speed, setSpeed] = useState<(typeof DEMO_SPEEDS)[number]>("5");
   const signedIn = account.status === "signed-in";
 
   useEffect(() => {
@@ -176,18 +174,15 @@ export function IntegrationPage({ id }: { id: string }) {
     (run) => !run.recorded && run.state !== "CERTIFIED" && run.state !== "FAILED",
   );
   const agreed = integration.scope.status === "agreed";
-  const demoBlocker = !partner
+  const blocker = !partner
     ? "Your partner has to join first."
     : !agreed
       ? "Both companies must accept the scope first."
-      : null;
-  const blocker = demoBlocker
-    ? demoBlocker
-    : !mine?.online || !theirs?.online
-      ? "Both agents must be online."
-      : running
-        ? "A live run is in progress."
-        : null;
+      : !mine?.online || !theirs?.online
+        ? "Both agents must be online."
+        : running
+          ? "A live run is in progress."
+          : null;
 
   return (
     <div className="page" data-testid="integration">
@@ -360,30 +355,6 @@ export function IntegrationPage({ id }: { id: string }) {
               </button>
             )}
             {blocker && <span className="muted">{blocker}</span>}
-          </div>
-          <span className="fg2">
-            Start (DEMO) plays a recorded, certified run between Spokes and Parcelly for both
-            companies at once. No agents, no cost.
-          </span>
-          <div className="row wrap">
-            <Segmented
-              value={speed}
-              onChange={setSpeed}
-              options={DEMO_SPEEDS.map((value) => ({ value, label: `${value}×` }))}
-            />
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={demoBlocker !== null}
-              title={demoBlocker ?? undefined}
-              onClick={() =>
-                act(async () =>
-                  navigate(sessionPath((await api.startDemo(id, Number(speed))).session_id)),
-                )
-              }
-            >
-              Start (DEMO)
-            </button>
           </div>
         </div>
         {integration.sessions.map((run) => (

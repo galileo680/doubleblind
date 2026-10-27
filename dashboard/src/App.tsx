@@ -8,7 +8,6 @@ import { IntegrationPage } from "./pages/IntegrationPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { InvitePage } from "./pages/InvitePage";
 import { LandingPage } from "./pages/LandingPage";
-import { IsolationPage } from "./pages/IsolationPage";
 import { PresentationPage } from "./pages/PresentationPage";
 import { SessionPage } from "./pages/SessionPage";
 import { SessionsPage } from "./pages/SessionsPage";
@@ -21,7 +20,6 @@ const PAGES: Record<SessionTab, () => React.JSX.Element> = {
   dashboard: SessionPage,
   contract: ContractPage,
   e2e: GatewayPage,
-  isolation: IsolationPage,
   certificate: CertificatePage,
 };
 
