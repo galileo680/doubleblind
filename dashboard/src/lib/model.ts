@@ -1,4 +1,14 @@
-import type { BrokerEvent, PartyView, Role, SessionState, SessionView } from "../api/types";
+import type {
+  BrokerEvent,
+  Certificate,
+  CertificateRun,
+  PartyView,
+  Role,
+  ScenarioRun,
+  SessionState,
+  SessionView,
+  TestResult,
+} from "../api/types";
 import type { ContractScenario } from "./contract";
 
 export type Tone = "a" | "b" | "o" | "e" | "w" | "i" | "n";
@@ -15,15 +25,6 @@ const STATES: Record<SessionState, [string, Tone]> = {
   CERTIFIED: ["Certified", "o"],
   FAILED: ["Failed", "e"],
 };
-
-export const LIFECYCLE: SessionState[] = [
-  "BRIEFING",
-  "NEGOTIATING",
-  "AWAITING_SIGNATURES",
-  "IMPLEMENTING",
-  "E2E",
-  "CERTIFIED",
-];
 
 export function stateMeta(state: SessionState): { label: string; tone: Tone; active: boolean } {
   const [label, tone] = STATES[state] ?? [state, "n"];
@@ -555,4 +556,21 @@ export function elapsedMs(
       ? new Date((finished ?? events.at(-1) ?? first).ts).getTime()
       : now;
   return end - new Date(first.ts).getTime();
+}
+
+export function runResults(run: CertificateRun | undefined): { id: string; status: string }[] {
+  if (!run) return [];
+  if (Array.isArray(run.results))
+    return (run.results as TestResult[]).map((item) => ({
+      id: item.scenario_id,
+      status: item.status,
+    }));
+  return ((run.results as { scenarios?: ScenarioRun[] }).scenarios ?? []).map((item) => ({
+    id: item.id,
+    status: item.status,
+  }));
+}
+
+export function certificateScenarios(certificate: Certificate) {
+  return ["consumer", "provider", "e2e"].flatMap((side) => runResults(certificate.results[side]));
 }

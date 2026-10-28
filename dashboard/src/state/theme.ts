@@ -8,17 +8,16 @@ function initialTheme(): Theme {
     const stored = localStorage.getItem(KEY);
     if (stored === "dark" || stored === "light") return stored;
   } catch {
-    return "dark";
+    return "light";
   }
-  return "dark";
+  return "light";
 }
 
-export function useTheme(forced?: Theme): [Theme, () => void] {
+export function useTheme(): [Theme, () => void] {
   const [theme, setTheme] = useState<Theme>(initialTheme);
-  const active = forced ?? theme;
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", active);
-  }, [active]);
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
   const toggle = () => {
     const next = theme === "dark" ? "light" : "dark";
     try {
@@ -28,5 +27,5 @@ export function useTheme(forced?: Theme): [Theme, () => void] {
     }
     setTheme(next);
   };
-  return [active, toggle];
+  return [theme, toggle];
 }

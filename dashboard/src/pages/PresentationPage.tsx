@@ -3,16 +3,14 @@ import { ChatBubble, useAutoScroll } from "../components/session/Center";
 import { ReplayBar } from "../components/session/Header";
 import { Logo, StateBadge } from "../components/ui";
 import { stopwatch, usd } from "../lib/format";
-import { chat, elapsedMs, LIFECYCLE, matrix } from "../lib/model";
+import { chat, elapsedMs, matrix } from "../lib/model";
 import { navigate, sessionPath } from "../state/route";
 import { useSessionContext } from "../state/session";
-import { useTheme } from "../state/theme";
 import { useContract } from "../state/useContract";
 
-const MARK = { pass: "✓", fail: "✕", running: "…", idle: "", na: "" };
+const MARK = { pass: "✓", fail: "✗", running: "…", idle: "·", na: "—" };
 
 export function PresentationPage() {
-  useTheme("dark");
   const { id, token, data, now } = useSessionContext();
   const session = data.session;
   const items = useMemo(() => chat(data.events, session), [data.events, session]);
@@ -33,8 +31,7 @@ export function PresentationPage() {
   const metrics = session?.metrics;
   const cost = metrics ? metrics.cost_usd + (metrics.sandbox_cost_usd ?? 0) : 0;
   const passing = rows.filter((row) => row.cells[row.side] === "pass").length;
-  const step = session ? Math.max(0, LIFECYCLE.indexOf(session.state)) : 0;
-  const progress = session?.state === "CERTIFIED" ? 100 : (step / (LIFECYCLE.length - 1)) * 100;
+  const certified = session?.state === "CERTIFIED";
   const caption =
     session?.state === "CERTIFIED"
       ? "Certified · every scenario green on both sides and end-to-end"
@@ -42,25 +39,21 @@ export function PresentationPage() {
 
   return (
     <div className="present" data-testid="presentation">
+      <div className="cert-stripe" />
       <div className="present-top">
-        <div className="row" style={{ gap: 14 }}>
-          <Logo size={22} />
-          <span style={{ fontSize: 22, fontWeight: 600 }}>DoubleBlind</span>
-        </div>
-        <div className="present-pair">
-          <span style={{ color: "var(--a)" }}>{consumer?.display_name}</span>
-          <span style={{ color: "var(--fg3)" }}>↔</span>
-          <span style={{ color: "var(--b)" }}>{provider?.display_name}</span>
-        </div>
+        <Logo size={30} />
+        <span className="present-pair">
+          {consumer?.display_name} ↔ {provider?.display_name}
+        </span>
         {session && <StateBadge state={session.state} large />}
         <span className="grow" />
-        <div className="row" style={{ gap: 36, alignItems: "flex-end" }}>
+        <div className="row" style={{ gap: 36 }}>
           <div className="present-num">
-            <div className="label">Elapsed</div>
+            Elapsed
             <div className="v">{stopwatch(elapsedMs(data.events, session?.state, now))}</div>
           </div>
           <div className="present-num">
-            <div className="label">Cost</div>
+            Cost
             <div className="v">{usd(cost)}</div>
           </div>
         </div>
@@ -75,7 +68,7 @@ export function PresentationPage() {
         </button>
       </div>
       <div className="present-body">
-        <div className="present-card" style={{ flex: "1.2 1 560px", minHeight: 520 }}>
+        <div className="present-card" style={{ flex: "1.3 1 520px" }}>
           <div className="head">
             <span>Negotiation room</span>
             <span className="mono">
@@ -92,23 +85,19 @@ export function PresentationPage() {
             ))}
           </div>
         </div>
-        <div className="present-card" style={{ flex: "1 1 520px" }}>
+        <div className="present-card" style={{ flex: "1 1 420px" }}>
           <div className="head">
             <span>Scenarios</span>
-            <span className="mono" style={{ color: "var(--o)" }}>
+            <span className="mono" style={{ color: certified ? "var(--o)" : "var(--fg)" }}>
               {passing} / {rows.length}
             </span>
           </div>
-          <div className="present-mrow label" style={{ padding: "14px 24px 6px", fontSize: 13 }}>
+          <div className="present-mrow present-cols">
             <span />
             <span />
-            <span style={{ textAlign: "center", color: "var(--a)" }}>
-              {consumer?.display_name?.toUpperCase()}
-            </span>
-            <span style={{ textAlign: "center", color: "var(--b)" }}>
-              {provider?.display_name?.toUpperCase()}
-            </span>
-            <span style={{ textAlign: "center" }}>E2E</span>
+            <span>{consumer?.display_name?.toUpperCase()}</span>
+            <span>{provider?.display_name?.toUpperCase()}</span>
+            <span>E2E</span>
           </div>
           <div className="present-matrix">
             {rows.map((row) => (
@@ -125,16 +114,9 @@ export function PresentationPage() {
           </div>
         </div>
       </div>
-      <div className="present-foot">
-        <div className="row" style={{ alignItems: "baseline", gap: 14 }}>
-          <span className="present-zero">{metrics?.code_lines_shared ?? 0}</span>
-          <span style={{ fontSize: 24, fontWeight: 500 }}>lines of code shared</span>
-        </div>
-        <div className="progress">
-          <div style={{ width: `${progress}%` }} />
-        </div>
-        <span style={{ fontSize: 18, color: "var(--fg2)" }}>{caption}</span>
-      </div>
+      <footer className="present-foot" style={certified ? { color: "var(--o)" } : undefined}>
+        {caption}
+      </footer>
     </div>
   );
 }

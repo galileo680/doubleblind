@@ -54,9 +54,6 @@ function TopPage({ route }: { route: Exclude<Route, { page: "session" }> }) {
       return <LandingPage />;
     case "sessions":
       return <SessionsPage />;
-    case "login":
-    case "signup":
-      return <AuthPage key={route.page} mode={route.page} next={route.next} />;
     case "integrations":
       return <IntegrationsPage />;
     case "integration":
@@ -76,6 +73,10 @@ export function App() {
         <PresentationPage />
       </SessionScope>
     );
+  }
+
+  if (route.page === "login" || route.page === "signup") {
+    return <AuthPage key={route.page} mode={route.page} next={route.next} />;
   }
 
   if (route.page === "session") {

@@ -4,22 +4,30 @@ import { elapsedMs, roleTone } from "../../lib/model";
 import { navigate, sessionPath } from "../../state/route";
 import { OBSERVER, useSessionContext } from "../../state/session";
 import { shareLink } from "../../state/sessions";
-import { Badge, Segmented, StateBadge, Swatch } from "../ui";
+import { Segmented, StateBadge, Swatch } from "../ui";
 import { StageBar } from "./StageBar";
 
-export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+export function CopyButton({
+  text,
+  label = "Copy",
+  plain = false,
+}: {
+  text: string;
+  label?: string;
+  plain?: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <button
       type="button"
-      className="btn btn-sm"
+      className={plain ? "btn btn-plain" : "btn btn-sm"}
       onClick={() => {
         navigator.clipboard?.writeText(text).catch(() => undefined);
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1600);
       }}
     >
-      {copied ? "Copied" : label}
+      {copied ? (plain ? "Link copied" : "Copied") : label}
     </button>
   );
 }
@@ -56,25 +64,34 @@ function AgentsConnect() {
 
 export function ReplayBar() {
   const { replay } = useSessionContext();
+  const progress = (
+    <span className="replay-progress mono">
+      <span>
+        <span style={{ width: `${(replay.position / Math.max(replay.total, 1)) * 100}%` }} />
+      </span>
+      {replay.position}/{replay.total}
+    </span>
+  );
   if (replay.recorded) {
     return (
       <div className="row" data-testid="recorded-run">
-        <Badge tone="w" pulse={replay.position < replay.total}>
-          Recorded run
-        </Badge>
-        <span className="mono muted">
-          {replay.position}/{replay.total}
-        </span>
+        <span className="outline-tag">Recorded run</span>
+        {progress}
       </div>
     );
   }
   return (
-    <div className="row" data-testid="replay-bar">
+    <div className="row wrap" data-testid="replay-bar">
       {replay.active ? (
         <>
-          <Badge tone="w">Recorded run</Badge>
+          <span className="outline-tag">Recorded run</span>
+          {progress}
           <button type="button" className="btn btn-sm" onClick={replay.toggle}>
-            {replay.playing ? "Pause" : replay.position >= replay.total ? "Replay again" : "Play"}
+            {replay.playing
+              ? "Pause"
+              : replay.position >= replay.total
+                ? "↻ Replay session"
+                : "Play"}
           </button>
           <Segmented
             small
@@ -86,9 +103,6 @@ export function ReplayBar() {
               { value: "fast", label: "4×" },
             ]}
           />
-          <span className="mono muted">
-            {replay.position}/{replay.total}
-          </span>
           <button type="button" className="btn btn-ghost btn-sm" onClick={replay.stop}>
             Back to live
           </button>
@@ -101,7 +115,7 @@ export function ReplayBar() {
           disabled={replay.total === 0}
           title="Play the recorded event log from the start"
         >
-          ▶ Replay session
+          ↻ Replay session
         </button>
       )}
     </div>
@@ -109,8 +123,7 @@ export function ReplayBar() {
 }
 
 export function SessionHeader() {
-  const { id, stored, view, setView, viewOptions, data, now, simulated, ownParty } =
-    useSessionContext();
+  const { id, stored, view, setView, viewOptions, data, now } = useSessionContext();
   const session = data.session;
   const events = data.events;
   const metrics = session?.metrics;
@@ -122,115 +135,122 @@ export function SessionHeader() {
   const e2e = tests
     ? ((tests.payload.report as { scenarios?: { status: string }[] }).scenarios ?? [])
     : [];
+  const e2eGreen = e2e.filter((item) => item.status === "passed").length;
+  const contractText = !version
+    ? "—"
+    : session?.signed_contract_version
+      ? `v${version} signed`
+      : `v${version} ${session?.state === "AWAITING_SIGNATURES" ? "converged" : "draft"}`;
 
   return (
     <div className="session-head">
       <div className="row wrap" style={{ alignItems: "flex-start", gap: 16 }}>
-        <div className="grow stack" style={{ minWidth: 300, gap: 6 }}>
+        <div className="stack" style={{ flex: "1 1 420px", minWidth: 0, gap: 6 }}>
           <div className="eyebrow">
             <span>{id}</span>
             {session && <StateBadge state={session.state} />}
+            <ReplayBar />
           </div>
           <h1 className="session-title">{session?.name ?? stored?.name ?? id}</h1>
           {consumer && provider && (
             <div className="parties-line">
               <span className="row" style={{ gap: 6 }}>
-                <Swatch tone="a" />
-                {consumer.display_name}
+                <Swatch tone="a" size={8} />
+                {consumer.display_name} consumes
               </span>
-              <span className="role">consumes</span>
               <span className="role">↔</span>
               <span className="row" style={{ gap: 6 }}>
-                <Swatch tone="b" />
-                {provider.display_name}
+                <Swatch tone="b" size={8} />
+                {provider.display_name} provides
               </span>
-              <span className="role">provides</span>
             </div>
           )}
           {session?.scope && (
-            <div className="muted" data-testid="session-scope">
-              Scope: {session.scope}
+            <div className="session-scope" data-testid="session-scope">
+              <span className="muted" style={{ fontSize: 13 }}>
+                Scope:
+              </span>{" "}
+              {session.scope}
             </div>
           )}
         </div>
-        <div className="row wrap">
-          <button
-            type="button"
-            className="btn btn-lg"
-            onClick={() => navigate(sessionPath(id, "contract"))}
-          >
-            Open contract
-          </button>
-          {stored && <CopyButton text={shareLink(stored)} label="Copy link" />}
-        </div>
-      </div>
-      <StageBar />
-      <div className="row wrap" style={{ gap: 20 }}>
-        <div className="metrics">
-          <div>
-            <span className="label">Round</span>
-            <div className="value">
-              {session ? `${session.round} / ${session.max_rounds}` : "—"}
-            </div>
+        <div className="stack" style={{ gap: 8, alignItems: "flex-end" }}>
+          <div className="row">
+            <button
+              type="button"
+              className="btn btn-plain"
+              onClick={() => navigate(sessionPath(id, "contract"))}
+            >
+              Open contract
+            </button>
+            {stored && <CopyButton text={shareLink(stored)} label="Copy link" plain />}
           </div>
-          <div>
-            <span className="label">Elapsed</span>
-            <div className="value">{duration(elapsedMs(events, session?.state, now))}</div>
+          <div className="row wrap" style={{ justifyContent: "flex-end" }}>
+            {view !== OBSERVER && (
+              <span className="label" style={{ fontWeight: 600, letterSpacing: "0.08em" }}>
+                COMPANY VIEW
+              </span>
+            )}
+            <span className="muted">View as</span>
+            <Segmented
+              value={view}
+              onChange={setView}
+              options={viewOptions.map((option) => ({
+                value: option.value,
+                disabled: option.disabled,
+                title: option.disabled ? "No token for this view in this browser" : undefined,
+                label: (
+                  <>
+                    <Swatch tone={option.tone} size={7} />
+                    {option.label}
+                  </>
+                ),
+              }))}
+            />
           </div>
-          <div>
-            <span className="label">Cost</span>
-            <div className="value">{usd(cost)}</div>
-          </div>
-          <div>
-            <span className="label">Contract</span>
-            <div className="value">
-              {version ? `v${version}${session?.signed_contract_version ? " · signed" : ""}` : "—"}
-            </div>
-          </div>
-          <div>
-            <span className="label">End-to-end</span>
-            <div className="value">
-              {e2e.length
-                ? `${e2e.filter((item) => item.status === "passed").length}/${e2e.length} green`
-                : "—"}
-            </div>
-          </div>
-        </div>
-        <span className="grow" />
-        <ReplayBar />
-        <div className="row">
-          <span className="muted">View as</span>
-          <Segmented
-            value={view}
-            onChange={setView}
-            options={viewOptions.map((option) => ({
-              value: option.value,
-              disabled: option.disabled,
-              title: option.disabled ? "No token for this view in this browser" : undefined,
-              label: (
-                <>
-                  <Swatch tone={option.tone} size={7} />
-                  {option.label}
-                </>
-              ),
-            }))}
-          />
         </div>
       </div>
       {view === OBSERVER && (
         <div className="alert">
-          <b>READ-ONLY</b>
-          Observer view: shared data from both companies, costs and the audit trail — never either
-          side's internals.
+          <span>
+            <b>Read-only:</b> shared data from both companies, costs and the audit trail — never
+            either side's internals.
+          </span>
         </div>
       )}
-      {simulated && ownParty && (
-        <div className="alert" data-testid="company-view">
-          <b>COMPANY VIEW</b>
-          Exactly what {ownParty.display_name} sees in this run: its own private data and the shared
-          contract, never the other company's internals.
+      <div className="metrics">
+        <div>
+          Round
+          <div
+            className="value"
+            style={session?.state === "ESCALATED" ? { color: "var(--w)" } : undefined}
+          >
+            {session ? `${session.round} / ${session.max_rounds}` : "—"}
+          </div>
         </div>
-      )}
+        <div>
+          Elapsed
+          <div className="value">{duration(elapsedMs(events, session?.state, now))}</div>
+        </div>
+        <div>
+          Cost
+          <div className="value">{usd(cost)}</div>
+        </div>
+        <div>
+          Contract
+          <div className="value">{contractText}</div>
+        </div>
+        <div>
+          End-to-end
+          <div
+            className="value"
+            style={e2e.length && e2eGreen === e2e.length ? { color: "var(--o)" } : undefined}
+          >
+            {e2e.length ? `${e2eGreen}/${e2e.length}` : "—"}
+          </div>
+        </div>
+      </div>
+      <StageBar />
       {data.error && <div className="alert alert-error">{data.error}</div>}
       <AgentsConnect />
     </div>

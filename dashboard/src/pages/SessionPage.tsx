@@ -1,9 +1,4 @@
-import {
-  CostPanel,
-  EgressPanel,
-  EventTimeline,
-  ScenarioMatrix,
-} from "../components/session/Bottom";
+import { BottomPanels } from "../components/session/Bottom";
 import { ContractTabs, NegotiationRoom, SignaturesBar } from "../components/session/Center";
 import { SessionHeader } from "../components/session/Header";
 import { PartyColumn } from "../components/session/PartyPanels";
@@ -34,6 +29,7 @@ export function SessionPage() {
               <PartyColumn party={left} own={ownParty?.party === left.party} position="first" />
             )}
             <div className="center-col">
+              <div className="party-head">Shared between both companies</div>
               <NegotiationRoom />
               <ContractTabs />
               <SignaturesBar />
@@ -42,12 +38,7 @@ export function SessionPage() {
               <PartyColumn party={right} own={ownParty?.party === right.party} position="last" />
             )}
           </div>
-          <ScenarioMatrix />
-          <div className="session-grid">
-            <EventTimeline />
-            <EgressPanel />
-            <CostPanel />
-          </div>
+          <BottomPanels />
         </>
       )}
     </div>

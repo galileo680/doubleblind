@@ -1,8 +1,11 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import { api, errorText } from "../../api/client";
 import type { BrokerEvent, Question, SessionState, SessionView } from "../../api/types";
 import { duration } from "../../lib/format";
 import { coderSteps, ofType, payload, signedParties } from "../../lib/model";
-import { useSessionContext } from "../../state/session";
+import { OBSERVER, useSessionContext } from "../../state/session";
+
+const EXTRA_ROUNDS = 6;
 
 const STAGES: [string, SessionState[]][] = [
   ["Private models and briefs", ["CREATED", "BRIEFING"]],
@@ -72,41 +75,84 @@ function nowText(session: SessionView, events: BrokerEvent[], questions: Questio
 }
 
 export function StageBar() {
-  const { data, now } = useSessionContext();
+  const { id, token, view, data, now, canAct } = useSessionContext();
+  const [error, setError] = useState<string | null>(null);
   const session = data.session;
   if (!session) return null;
   const failed = session.state === "FAILED";
+  const certified = session.state === "CERTIFIED";
+  const escalated = session.state === "ESCALATED";
   const current = stageOf(failed ? failedFrom(data.events) : session.state);
   const since = ofType(data.events, "session.state_changed").at(-1)?.ts;
-  const finished = failed || session.state === "CERTIFIED";
+  const integration = session.integration_id;
+  const act = (action: () => Promise<unknown>) => {
+    setError(null);
+    action().catch((failure: unknown) => setError(errorText(failure)));
+  };
   return (
     <div className="stagebar" data-testid="stage-bar">
       <div className="stages">
         {STAGES.map(([label], index) => {
-          const status =
-            index < current || (session.state === "CERTIFIED" && index === current)
-              ? "done"
-              : index === current
-                ? failed
-                  ? "failed"
+          const done = index < current || certified;
+          const status = done
+            ? "done"
+            : index === current
+              ? failed
+                ? "failed"
+                : escalated
+                  ? "now wait"
                   : "now"
-                : "";
+              : "";
           return (
             <Fragment key={label}>
-              {index > 0 && (
-                <span className={`stage-arrow${index <= current ? " passed" : ""}`}>→</span>
-              )}
-              <span className={`stage ${status}`}>{label}</span>
+              {index > 0 && <span className="stage-arrow">→</span>}
+              <span className={`stage ${status}`}>
+                <span className="mark">{done ? "✓" : index + 1}</span>
+                {label}
+              </span>
             </Fragment>
           );
         })}
       </div>
       <div className="stage-now">
-        {nowText(session, data.events, data.questions)}
-        {since && !finished && (
-          <span className="muted"> · this stage for {duration(now - Date.parse(since))}</span>
+        <span
+          className="dot"
+          style={{
+            background: escalated
+              ? "var(--w)"
+              : certified
+                ? "var(--o)"
+                : failed
+                  ? "var(--e)"
+                  : "var(--p)",
+          }}
+        />
+        <span>
+          {nowText(session, data.events, data.questions)}
+          {since && !failed && !certified && ` · ${duration(now - Date.parse(since))}`}
+        </span>
+        {escalated && view !== OBSERVER && canAct && (
+          <>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => act(() => api.resume(id, token, EXTRA_ROUNDS))}
+            >
+              Allow {EXTRA_ROUNDS} more rounds
+            </button>
+            {integration && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => act(() => api.stopLive(integration))}
+              >
+                Stop run
+              </button>
+            )}
+          </>
         )}
       </div>
+      {error && <div className="alert alert-error">{error}</div>}
     </div>
   );
 }

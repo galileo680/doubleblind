@@ -75,8 +75,16 @@ export function GatewayPage() {
       <div className="kpis">
         <Kpi label="Requests" value={requests.length} />
         <Kpi label="Within contract" value={requests.length - offContract.length} tone="o" />
-        <Kpi label="Rejected off-contract" value={offContract.length} tone="e" />
-        <Kpi label="Schema violations" value={violations.length} tone="w" />
+        <Kpi
+          label="Rejected off-contract"
+          value={offContract.length}
+          tone={offContract.length ? "e" : undefined}
+        />
+        <Kpi
+          label="Schema violations"
+          value={violations.length}
+          tone={violations.length ? "w" : undefined}
+        />
         <Kpi label="p95 latency" value={`${p95} ms`} />
         <Kpi
           label="E2E scenarios"
@@ -144,12 +152,7 @@ export function GatewayPage() {
                           <Swatch tone={roleTone(target?.role)} size={7} />
                           {target?.display_name ?? request.party}
                         </span>
-                        <span
-                          className="method"
-                          style={{ color: request.method === "GET" ? "var(--a)" : "var(--o)" }}
-                        >
-                          {request.method}
-                        </span>
+                        <span className="method">{request.method}</span>
                         <span className="ellipsis">{request.path}</span>
                         <span
                           style={{
@@ -185,10 +188,7 @@ export function GatewayPage() {
                 <CardHead title="Request detail" note={`#${current.seq}`} />
                 <div className="card-pad">
                   <div className="mono" style={{ fontWeight: 600 }}>
-                    <span style={{ color: current.method === "GET" ? "var(--a)" : "var(--o)" }}>
-                      {current.method}
-                    </span>{" "}
-                    {current.path}
+                    <span style={{ color: "var(--p)" }}>{current.method}</span> {current.path}
                   </div>
                   {!current.allowed && (
                     <div className="alert alert-error">

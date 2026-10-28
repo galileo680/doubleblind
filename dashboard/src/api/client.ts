@@ -122,6 +122,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ version }),
     }),
+  resume: (id: string, token: string | null, extraRounds: number) =>
+    request<unknown>(`${session(id)}/resume`, token, {
+      method: "POST",
+      body: JSON.stringify({ extra_rounds: extraRounds }),
+    }),
   certificate: (id: string, token: string | null) =>
     request<Certificate>(`${session(id)}/certificate`, token),
 };

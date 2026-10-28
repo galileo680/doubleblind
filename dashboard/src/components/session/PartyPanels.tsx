@@ -12,8 +12,8 @@ import {
   signedParties,
   turns,
 } from "../../lib/model";
-import { useSessionContext } from "../../state/session";
-import { Label, Locked, Swatch } from "../ui";
+import { OBSERVER, useSessionContext } from "../../state/session";
+import { LockedTile, Swatch } from "../ui";
 
 const BRIEF_LABELS: Record<string, string> = {
   data_we_have: "Data we have",
@@ -75,31 +75,30 @@ function AgentCard({ party, own }: { party: PartyView; own: boolean }) {
     steps.at(-1)?.note,
     psm(data.events, party.party) !== null,
   );
-  const done = session.state === "CERTIFIED";
+  const finished = session.state === "CERTIFIED" || session.state === "FAILED";
   const tone = roleTone(party.role);
   return (
-    <div className="card card-pad">
-      <div className="agent-row">
-        <div className={`agent-avatar tone-${tone}`}>AI</div>
-        <div className="grow" style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 500 }}>{party.display_name} agent</div>
-          <div className="muted">
-            {own ? `Reads ${party.display_name} code & docs only` : "Model and prompts not shared"}
-          </div>
-        </div>
-        <span
-          className={`dot${done ? "" : " pulse"}`}
-          style={{ width: 8, height: 8, background: done ? "var(--o)" : "var(--i)" }}
-        />
+    <div className={`card card-pad agent-card tone-${tone}`}>
+      <div className="row">
+        <span className="grow" style={{ fontWeight: 600 }}>
+          {party.display_name} agent
+        </span>
+        <span className="agent-state" style={finished ? { color: "var(--fg3)" } : undefined}>
+          <span className={`dot${finished ? "" : " pulse"}`} />
+          {finished ? "done" : "online"}
+        </span>
+      </div>
+      <div className="fg2" style={{ fontSize: 12.5 }}>
+        Reads {party.display_name} code &amp; docs only
       </div>
       <div className="now">
         <span className="label">NOW</span>
         <span>{now}</span>
       </div>
-      <div className="mono muted">
+      <div className="agent-foot mono">
         {own
           ? "Token Factory sandbox · no network · model API only"
-          : "Isolated sandbox · verified by probes"}
+          : `${party.display_name} ${party.role} · Token Factory sandbox`}
       </div>
     </div>
   );
@@ -111,8 +110,8 @@ function SystemModel({ party }: { party: PartyView }) {
   return (
     <div className="card card-pad">
       <div className="card-section-head">
-        <Label>Private system model</Label>
-        <span className="muted">never leaves {party.display_name}</span>
+        <span className="panel-title">Private system model</span>
+        <span className="tiny-tag">never leaves {party.display_name}</span>
       </div>
       {stats ? (
         <div className="stat-grid">
@@ -125,12 +124,8 @@ function SystemModel({ party }: { party: PartyView }) {
             <div className="k">tokens read</div>
           </div>
           <div className="stat">
-            <div className="v">{Math.round(stats.seconds)} s</div>
+            <div className="v">{Math.round(stats.seconds)}s</div>
             <div className="k">to build</div>
-          </div>
-          <div className="stat">
-            <div className="v">0</div>
-            <div className="k">lines shared</div>
           </div>
         </div>
       ) : (
@@ -190,7 +185,7 @@ function QuestionCard({ question, canAnswer }: { question: Question; canAnswer: 
         <div className="answered">
           <span className="ok">✓</span> {question.answer}{" "}
           <span className="muted">
-            · {who ?? "answered"}
+            · answered by {who ?? "a human"}
             {question.decision_id ? ` · decision ${question.decision_id}` : ""}
           </span>
         </div>
@@ -206,8 +201,8 @@ function Questions({ party, canAnswer }: { party: PartyView; canAnswer: boolean 
   return (
     <div className="card card-pad" data-testid={`questions-${party.party}`}>
       <div className="card-section-head">
-        <Label>Questions for our humans</Label>
-        <span className="mono" style={{ fontSize: 11, color: open ? "var(--a)" : "var(--fg3)" }}>
+        <span className="panel-title">Questions for our humans</span>
+        <span className="mono" style={{ fontSize: 11, color: open ? "var(--p)" : "var(--fg3)" }}>
           {open ? `${open} open` : `${questions.length} answered`}
         </span>
       </div>
@@ -234,8 +229,10 @@ function Implementation({ party }: { party: PartyView }) {
   return (
     <div className="card card-pad">
       <div className="card-section-head">
-        <Label>Implementation</Label>
-        <span className="muted">visible only to {party.display_name}</span>
+        <span className="panel-title">Implementation</span>
+        <span className="mono fg2" style={{ fontSize: 12 }}>
+          {steps.length ? `${steps.length} steps` : ""}
+        </span>
       </div>
       {steps.length === 0 && !last ? (
         <div className="muted">
@@ -263,7 +260,7 @@ function Implementation({ party }: { party: PartyView }) {
               <span>{steps.length}</span>
             </div>
             <div>
-              <span>Files changed</span>
+              <span>Files changed · visible only to {party.display_name}</span>
               <span>{steps.at(-1)?.files ?? 0}</span>
             </div>
             <div>
@@ -302,7 +299,7 @@ function BriefCard({ party }: { party: PartyView }) {
     : [];
   return (
     <div className="card card-pad">
-      <Label>Brief · shared by {party.display_name}</Label>
+      <span className="panel-title">Shared brief</span>
       {!shared ? (
         <div className="muted">
           Not shared yet. The brief is the only description that leaves the company.
@@ -340,7 +337,7 @@ function SharedFacts({ party, session }: { party: PartyView; session: SessionVie
     session.signed_contract_version ?? session.current_contract_version,
   );
   return (
-    <div className="facts">
+    <div className="facts plain">
       <div>
         <span>Turns in negotiation</span>
         <span>{own.length}</span>
@@ -382,13 +379,12 @@ export function PartyColumn({
   return (
     <div className={`side-col ${position}`} data-testid={`party-${party.party}`}>
       <div className="party-head">
-        <Swatch tone={tone} size={10} />
-        <span className="name">{name}</span>
-        <span className="muted">{party.role === "consumer" ? "Consumer" : "Provider"}</span>
-        <span className="grow" />
-        <span className="label" style={{ color: own ? `var(--${tone})` : "var(--fg3)" }}>
-          {own ? "Our side" : view === "observer" ? "Shared data" : "Partner · shared only"}
-        </span>
+        <Swatch tone={tone} size={8} />
+        {own
+          ? `Our side · ${name}`
+          : view === OBSERVER
+            ? `${name} · shared only`
+            : "Partner · shared only"}
       </div>
       <AgentCard party={party} own={own} />
       {own ? (
@@ -399,15 +395,24 @@ export function PartyColumn({
         </>
       ) : (
         <>
+          <div className="muted" style={{ padding: "0 2px" }}>
+            Model and prompts not shared
+          </div>
           <BriefCard party={party} />
           <div className="card card-pad">
-            <Label>What {name} shares</Label>
+            <span className="panel-title">What {name} shares</span>
             <SharedFacts party={party} session={session} />
           </div>
-          <Locked title="System model" owner={name} />
-          <Locked title={`Questions to ${name} humans`} owner={name} />
-          <Locked title="Implementation & changed files" owner={name} />
-          <Locked title="Sandbox logs" owner={name} />
+          <div className="locked-grid">
+            {[
+              "System model",
+              `Questions to ${name} humans`,
+              "Implementation & changed files",
+              "Sandbox logs",
+            ].map((title) => (
+              <LockedTile key={title} title={title} owner={name} />
+            ))}
+          </div>
         </>
       )}
     </div>

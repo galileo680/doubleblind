@@ -23,21 +23,22 @@ export function ChatBubble({ item, session }: { item: ChatItem; session: Session
   const side = party?.role === "provider" ? "right" : "left";
   return (
     <div className={`bubble-wrap ${side}`}>
-      <div className="bubble-meta">
-        <Swatch tone={tone} size={7} />
-        <span className="who">{party?.display_name ?? item.turn.party} agent</span>
-        <span className="mono">R{item.turn.round}</span>
-        <span className="mono">→ v{item.turn.version}</span>
-        {item.turn.status === "ready_to_sign" && <Badge tone="o">ready to sign</Badge>}
-      </div>
-      <div className={`bubble tone-${tone}`}>{item.turn.message}</div>
-      {item.turn.patches.length > 0 && (
-        <div className="bubble-patches">
-          {item.turn.patches.length} change{item.turn.patches.length === 1 ? "" : "s"} ·{" "}
-          {item.turn.patches.slice(0, 3).join(" · ")}
-          {item.turn.patches.length > 3 ? " …" : ""}
+      <div className={`bubble tone-${tone}`}>
+        <div className="bubble-meta">
+          <span className="round mono">R{item.turn.round}</span>
+          <span className="who">{party?.display_name ?? item.turn.party} agent</span>
+          <span className="mono">v{item.turn.version}</span>
+          {item.turn.status === "ready_to_sign" && <Badge tone="o">ready to sign</Badge>}
         </div>
-      )}
+        <div className="bubble-text">{item.turn.message}</div>
+        {item.turn.patches.length > 0 && (
+          <div className="bubble-patches">
+            {item.turn.patches.length} change{item.turn.patches.length === 1 ? "" : "s"} ·{" "}
+            {item.turn.patches.slice(0, 3).join(" · ")}
+            {item.turn.patches.length > 3 ? " …" : ""}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -76,8 +77,8 @@ export function NegotiationRoom() {
   const turnsCount = items.filter((item) => item.kind === "turn").length;
   return (
     <Card testId="negotiation-room">
-      <CardHead title="Negotiation room" note={`Shared with both companies · ${turnsCount} turns`}>
-        <span className="mono muted">
+      <CardHead title="Negotiation room" note={`${turnsCount} turns`}>
+        <span className="mono fg2" style={{ fontSize: 12 }}>
           round {session?.round ?? 0} / {session?.max_rounds ?? "—"}
         </span>
       </CardHead>
@@ -343,12 +344,7 @@ export function SignaturesBar() {
   return (
     <Card testId="signatures">
       <div className="signatures">
-        <div style={{ minWidth: 150 }}>
-          <div style={{ fontWeight: 600 }}>Signatures</div>
-          <div className="muted">
-            {opened ? `Contract v${version}` : "Open when the contract converges"}
-          </div>
-        </div>
+        <div style={{ fontWeight: 600, minWidth: 90 }}>Signatures</div>
         {session.parties.map((party) => {
           const done =
             signed.has(party.party) || (!awaiting && session.signed_contract_version === version);
@@ -356,24 +352,26 @@ export function SignaturesBar() {
           return (
             <div key={party.party} className={`sig${canSign ? " need" : ""}`}>
               <Swatch tone={roleTone(party.role)} />
-              <div className="grow" style={{ minWidth: 0, lineHeight: 1.35 }}>
-                <div style={{ fontWeight: 500 }}>{party.display_name}</div>
-                <div className="muted">{party.display_name} approver</div>
+              <div className="grow" style={{ minWidth: 0, lineHeight: 1.3 }}>
+                <div style={{ fontWeight: 500, fontSize: 13 }}>{party.display_name}</div>
+                <div className="muted" style={done && opened ? { color: "var(--o)" } : undefined}>
+                  {!opened
+                    ? "Open when the contract converges"
+                    : done
+                      ? `${party.display_name} signed v${version}`
+                      : `Waiting for ${party.display_name}`}
+                </div>
               </div>
-              {canSign ? (
+              {!done && opened && (
                 <button
                   type="button"
                   className="btn btn-primary btn-sm"
                   onClick={sign}
-                  disabled={busy}
+                  disabled={busy || !canSign}
                 >
                   {busy && <span className="spinner" />}
                   Sign v{version}
                 </button>
-              ) : done && opened ? (
-                <span className="signed">✓ Signed</span>
-              ) : (
-                <span className="pending">{opened ? "Pending" : "Not yet open"}</span>
               )}
             </div>
           );

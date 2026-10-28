@@ -48,6 +48,7 @@ export interface SessionView {
   id: string;
   name: string;
   recorded: boolean;
+  integration_id: string | null;
   you: string | null;
   scope: string | null;
   preset: string;

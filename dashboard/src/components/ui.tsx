@@ -110,17 +110,16 @@ export function Segmented<T extends string>({
   );
 }
 
-export function Locked({ title, owner }: { title: string; owner: string }) {
+export function LockedTile({ title, owner }: { title: string; owner: string }) {
   return (
-    <div className="locked">
+    <div className="locked-tile" title={`Private to ${owner} · not shared`}>
       <div className="locked-blur" aria-hidden>
-        <div className="locked-title">{title}</div>
-        <div className="bar" style={{ width: "86%" }} />
-        <div className="bar" style={{ width: "64%" }} />
-        <div className="bar" style={{ width: "75%" }} />
+        <span style={{ width: "80%" }} />
+        <span style={{ width: "55%" }} />
+        <span style={{ width: "68%" }} />
       </div>
-      <div className="locked-cover">
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+      <div className="locked-name">
+        <svg width="12" height="12" viewBox="0 0 14 14" aria-hidden>
           <rect x="2.5" y="6" width="9" height="6.5" rx="1.5" fill="currentColor" />
           <path
             d="M4.5 6V4.5a2.5 2.5 0 0 1 5 0V6"
@@ -129,10 +128,7 @@ export function Locked({ title, owner }: { title: string; owner: string }) {
             fill="none"
           />
         </svg>
-        <div>
-          <div className="locked-name">{title}</div>
-          <div className="muted">Private to {owner} · not shared</div>
-        </div>
+        {title}
       </div>
     </div>
   );
@@ -186,7 +182,7 @@ export function Kpi({
 }) {
   return (
     <div className="kpi">
-      <Label>{label}</Label>
+      <div>{label}</div>
       <div className="kpi-value" style={tone ? { color: `var(--${tone})` } : undefined}>
         {value}
       </div>
@@ -197,9 +193,17 @@ export function Kpi({
 
 export function Logo({ size = 16 }: { size?: number }) {
   return (
-    <span className="logo" style={{ width: size * 1.45, height: size }} aria-hidden>
-      <span style={{ width: size, height: size, borderColor: "var(--a)" }} />
-      <span style={{ width: size, height: size, left: size * 0.45, borderColor: "var(--b)" }} />
+    <span className="logo" style={{ width: size * 1.4, height: size }} aria-hidden>
+      <span style={{ width: size, height: size, borderWidth: size / 8, borderColor: "var(--p)" }} />
+      <span
+        style={{
+          width: size,
+          height: size,
+          left: size * 0.4,
+          borderWidth: size / 8,
+          borderColor: "var(--fg)",
+        }}
+      />
     </span>
   );
 }

@@ -46,7 +46,7 @@ test("a human creates a session, answers the agents' questions and signs both si
     );
 
     await viewAs(page, /Spokes/);
-    await expect(page.getByTestId("party-parcelly")).toContainText("Private to Parcelly");
+    await expect(page.getByTestId("party-parcelly")).toContainText("Model and prompts not shared");
     await expect(page.getByTestId("party-parcelly")).not.toContainText("Questions for our humans");
     await page
       .getByTestId("question-Q1")
@@ -59,21 +59,23 @@ test("a human creates a session, answers the agents' questions and signs both si
       .click({ timeout: 90_000 });
     await expect(page.getByTestId("question-Q2")).toContainText("✓");
 
-    const sign = page.getByTestId("signatures").getByRole("button", { name: /^Sign v\d+/ });
+    const sign = page
+      .getByTestId("signatures")
+      .getByRole("button", { name: /^Sign v\d+/, disabled: false });
     await sign.click({ timeout: 120_000 });
-    await expect(page.getByTestId("signatures")).toContainText("✓ Signed");
+    await expect(page.getByTestId("signatures")).toContainText(/signed v\d+/);
 
     await viewAs(page, /Parcelly/);
     await page
       .getByTestId("signatures")
-      .getByRole("button", { name: /^Sign v\d+/ })
+      .getByRole("button", { name: /^Sign v\d+/, disabled: false })
       .click();
 
     await viewAs(page, /Observer/);
     await expect(page.getByTestId("state-badge").first()).toHaveText(/Certified/, {
       timeout: 120_000,
     });
-    await expect(page.getByTestId("matrix-E1")).toContainText("Pass");
+    await expect(page.getByTestId("matrix-E1")).toContainText("✓ pass");
     await expect(page.getByTestId("negotiation-room")).toContainText("Certificate issued");
 
     const published = await page.request.post(`/api/v1/sessions/${stored.id}/publish`, {
@@ -89,12 +91,12 @@ test("a human creates a session, answers the agents' questions and signs both si
     await expect(replay.getByRole("button", { name: "Pause" })).toBeVisible();
     await expect(page.getByTestId("state-badge").first()).not.toHaveText(/Certified/);
     await replay.getByRole("tab", { name: "4×" }).click();
-    await expect(replay.getByRole("button", { name: "Replay again" })).toBeVisible({
+    await expect(replay.getByRole("button", { name: "↻ Replay session" })).toBeVisible({
       timeout: 120_000,
     });
     await expect(page.getByTestId("state-badge").first()).toHaveText(/Certified/);
     await replay.getByRole("button", { name: "Back to live" }).click();
-    await expect(replay.getByRole("button", { name: "▶ Replay session" })).toBeVisible();
+    await expect(replay.getByRole("button", { name: "↻ Replay session" })).toBeVisible();
   } finally {
     agents?.kill();
   }

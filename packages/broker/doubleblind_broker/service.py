@@ -617,6 +617,7 @@ class BrokerService:
             "id": record.id,
             "name": record.name,
             "recorded": link is not None and link.recorded,
+            "integration_id": link.integration_id if link else None,
             "you": principal.party_key,
             "scope": self.preset(record.preset).scope,
             "preset": record.preset,

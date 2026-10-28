@@ -8,14 +8,6 @@ import { navigate, sessionPath } from "../state/route";
 import { useSessionContext } from "../state/session";
 import { useContract, useContractDiff } from "../state/useContract";
 
-const METHOD_COLOR: Record<string, string> = {
-  GET: "var(--a)",
-  POST: "var(--o)",
-  PUT: "var(--w)",
-  PATCH: "var(--w)",
-  DELETE: "var(--e)",
-};
-
 function Section({
   id,
   title,
@@ -74,12 +66,7 @@ function Rendered({ contract }: { contract: ContractView }) {
                     <div className="muted mono">{operation.headers.join(", ")}</div>
                   )}
                 </span>
-                <span
-                  className="method"
-                  style={{ color: METHOD_COLOR[operation.method] ?? "var(--fg2)" }}
-                >
-                  {operation.method}
-                </span>
+                <span className="method">{operation.method}</span>
                 <span className="mono" style={{ overflowWrap: "anywhere" }}>
                   {operation.path}
                 </span>

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { errorText } from "../api/client";
 import { signIn, signUp } from "../state/account";
+import { Logo } from "../components/ui";
 import { authPath, navigate } from "../state/route";
 
 export function AuthPage({ mode, next }: { mode: "login" | "signup"; next: string }) {
@@ -26,11 +27,25 @@ export function AuthPage({ mode, next }: { mode: "login" | "signup"; next: strin
     }
   };
 
+  const short = signup && password.length > 0 && password.length < 10;
+
   return (
-    <div className="page">
+    <div className="auth-screen">
+      <a className="auth-brand" href="#/">
+        <Logo size={24} />
+        <span>
+          <b>DoubleBlind</b>
+          <span>Integrations without shared code</span>
+        </span>
+      </a>
       <form className="form-card auth-card" onSubmit={submit} data-testid={`${mode}-form`}>
-        <div className="page-head">
+        <div>
           <h1>{signup ? "Create a company account" : "Sign in"}</h1>
+          <div className="fg2" style={{ marginTop: 4, fontSize: 13.5 }}>
+            {signup
+              ? "You can invite your partner company after you create the first integration."
+              : "Sign in to your company account."}
+          </div>
         </div>
         {signup && (
           <label className="field">
@@ -40,19 +55,21 @@ export function AuthPage({ mode, next }: { mode: "login" | "signup"; next: strin
               value={company}
               onChange={(event) => setCompany(event.target.value)}
               autoComplete="organization"
+              placeholder="Spokes"
               maxLength={80}
               required
             />
           </label>
         )}
         <label className="field">
-          Work e-mail
+          {signup ? "Work e-mail" : "E-mail"}
           <input
             className="input"
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             autoComplete="email"
+            placeholder="you@company.com"
             required
           />
         </label>
@@ -66,27 +83,30 @@ export function AuthPage({ mode, next }: { mode: "login" | "signup"; next: strin
             autoComplete={signup ? "new-password" : "current-password"}
             minLength={signup ? 10 : undefined}
             maxLength={200}
+            style={short ? { borderColor: "var(--w)" } : undefined}
             required
           />
-          {signup && <span className="muted">At least 10 characters.</span>}
+          {signup && (
+            <span className={`field-hint${short ? " warn" : ""}`}>
+              {short
+                ? `At least 10 characters · ${10 - password.length} more`
+                : "At least 10 characters"}
+            </span>
+          )}
         </label>
         {error && <div className="alert alert-error">{error}</div>}
-        <button className="btn btn-primary" type="submit" disabled={busy}>
+        <button className="btn btn-primary btn-lg" type="submit" disabled={busy}>
           {busy && <span className="spinner" />}
           {signup ? "Create account" : "Sign in"}
         </button>
-        <span className="muted">
-          {signup ? (
-            <>
-              Already have an account? <a href={authPath("login", next)}>Sign in</a>
-            </>
-          ) : (
-            <>
-              New company? <a href={authPath("signup", next)}>Create an account</a>
-            </>
-          )}
-        </span>
+        <div className="row fg2" style={{ justifyContent: "center", fontSize: 13 }}>
+          {signup ? "Already have an account?" : "New to DoubleBlind?"}
+          <a href={authPath(signup ? "login" : "signup", next)} style={{ fontWeight: 500 }}>
+            {signup ? "Sign in" : "Create a company account"}
+          </a>
+        </div>
       </form>
+      <div className="muted">One account is one company. Your partner company creates its own.</div>
     </div>
   );
 }

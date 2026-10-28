@@ -1,12 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api, errorText } from "../api/client";
 import type { Integration, Role } from "../api/types";
-import { Badge, Card, Empty, Segmented, Spinner } from "../components/ui";
+import { Empty, Spinner, Swatch } from "../components/ui";
 import { otherRole, ROLE_TEXT, roleTone } from "../lib/model";
 import { useAccount } from "../state/account";
 import { authPath, integrationPath, navigate } from "../state/route";
 
-const COLUMNS = "minmax(220px,1fr) minmax(200px,1fr) 250px";
+const SIDES: [Role, string, string][] = [
+  ["provider", "Provider", "Exposes the API"],
+  ["consumer", "Consumer", "Calls the partner's API"],
+];
 
 export function SignInFirst({ next }: { next: string }) {
   return (
@@ -50,61 +53,64 @@ function NewIntegration() {
   };
 
   return (
-    <form className="form-card" onSubmit={submit} data-testid="new-integration">
-      <div className="form-step">
-        <b>New integration</b>
-        <span className="muted">You invite your partner company on the next screen.</span>
-      </div>
+    <form className="form-card new-integration" onSubmit={submit} data-testid="new-integration">
+      <div className="form-title">New integration</div>
       <label className="field">
         Name
         <input
           className="input"
           value={name}
           onChange={(event) => setName(event.target.value)}
-          placeholder="Spokes ↔ Parcelly shipping"
+          placeholder="Paid order → shipment"
           maxLength={120}
           required
         />
       </label>
       <div className="field">
         Your side
-        <Segmented
-          value={role}
-          onChange={setRole}
-          options={[
-            { value: "provider", label: ROLE_TEXT.provider },
-            { value: "consumer", label: ROLE_TEXT.consumer },
-          ]}
-        />
+        <div className="side-pick">
+          {SIDES.map(([value, title, text]) => (
+            <button
+              key={value}
+              type="button"
+              className={`tone-${roleTone(value)}${role === value ? " on" : ""}`}
+              onClick={() => setRole(value)}
+            >
+              <b>
+                <Swatch tone={roleTone(value)} size={8} />
+                {title}
+              </b>
+              <span>{text}</span>
+            </button>
+          ))}
+        </div>
       </div>
       <label className="field">
         What should the integration do?
         <textarea
           className="input"
-          rows={3}
+          rows={4}
           value={scope}
           onChange={(event) => setScope(event.target.value)}
-          placeholder="When an order is paid, Spokes creates a shipment at Parcelly; Parcelly sends every status change back by webhook."
+          placeholder="When an order is paid, Spokes creates a shipment at Parcelly…"
           minLength={10}
           maxLength={2000}
           required
         />
-        <span className="muted">
-          Your partner accepts or changes it; the agents build exactly this scope.
-        </span>
       </label>
       {error && <div className="alert alert-error">{error}</div>}
-      <div className="row">
-        <span className="grow" />
-        <button
-          className="btn btn-primary"
-          type="submit"
-          disabled={busy || !name.trim() || scope.trim().length < 10}
-        >
-          {busy && <span className="spinner" />}
-          Create integration
-        </button>
-      </div>
+      <button
+        className="btn btn-primary btn-lg"
+        type="submit"
+        disabled={busy || !name.trim() || scope.trim().length < 10}
+        style={{ justifyContent: "center" }}
+      >
+        {busy && <span className="spinner" />}
+        Create integration
+      </button>
+      <span className="muted" style={{ fontSize: 12.5 }}>
+        You invite your partner company on the next screen.
+      </span>
     </form>
   );
 }
@@ -123,47 +129,66 @@ export function IntegrationsPage() {
   if (account.status === "signed-out") return <SignInFirst next="#/integrations" />;
 
   return (
-    <div className="page">
+    <div className="page" style={{ maxWidth: 1280 }}>
       <div className="page-head">
         <div className="grow">
           <h1>Integrations</h1>
-          <div className="fg2">
-            {account.account.company} · each integration connects your system with one partner
-            company
-          </div>
+          <div className="fg2">Integrations of {account.account.company}</div>
         </div>
       </div>
       {error && <div className="alert alert-error">{error}</div>}
-      {items === null ? (
-        !error && <Spinner />
-      ) : items.length === 0 ? (
-        <Empty title="No integrations yet">Create one below and invite your partner.</Empty>
-      ) : (
-        <Card testId="integrations">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="trow click"
-              style={{ gridTemplateColumns: COLUMNS }}
-              onClick={() => navigate(integrationPath(item.id))}
-            >
-              <div className="ellipsis">
-                <div style={{ fontWeight: 500 }} className="ellipsis">
-                  {item.name}
-                </div>
-                <div className="muted mono">{item.id}</div>
-              </div>
-              <span className={item.companies[otherRole(item.your_role)] ? "" : "muted"}>
-                {item.companies[otherRole(item.your_role)] ?? "Waiting for partner"}
-              </span>
-              <span>
-                <Badge tone={roleTone(item.your_role)}>{ROLE_TEXT[item.your_role]}</Badge>
-              </span>
+      <div className="row wrap" style={{ gap: 20, alignItems: "flex-start" }}>
+        <div style={{ flex: "2 1 520px", minWidth: 0 }}>
+          {items === null ? (
+            !error && <Spinner />
+          ) : items.length === 0 ? (
+            <Empty title="No integrations yet">
+              Describe what the integration should do in the card on the right. You invite your
+              partner company on the next screen.
+            </Empty>
+          ) : (
+            <div className="card" data-testid="integrations">
+              {items.map((item) => {
+                const partner = item.companies[otherRole(item.your_role)];
+                return (
+                  <div
+                    key={item.id}
+                    className="list-item"
+                    onClick={() => navigate(integrationPath(item.id))}
+                  >
+                    <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                      <div className="ellipsis" style={{ fontWeight: 600 }}>
+                        {item.name}
+                      </div>
+                      <div className="mono muted">{item.id}</div>
+                    </div>
+                    <div className="row" style={{ flex: "1 1 160px", minWidth: 0 }}>
+                      {partner ? (
+                        <>
+                          <span className="initial">{partner.slice(0, 1).toUpperCase()}</span>
+                          <span style={{ fontWeight: 500 }}>{partner}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="initial empty-initial" />
+                          <span className="muted" style={{ fontSize: 14 }}>
+                            Waiting for partner
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <span className={`role-badge tone-${roleTone(item.your_role)}`}>
+                      {ROLE_TEXT[item.your_role]}
+                    </span>
+                    <span className="muted">›</span>
+                  </div>
+                );
+              })}
             </div>
-          ))}
-        </Card>
-      )}
-      <NewIntegration />
+          )}
+        </div>
+        <NewIntegration />
+      </div>
     </div>
   );
 }

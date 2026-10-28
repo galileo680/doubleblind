@@ -61,14 +61,15 @@ function AccountMenu() {
   if (account.status === "loading") return null;
   if (account.status === "signed-out") {
     return (
-      <a className="btn btn-sm" href={authPath("login", "#/integrations")}>
+      <a className="btn btn-sm btn-primary" href={authPath("login", "#/integrations")}>
         Sign in
       </a>
     );
   }
   return (
     <span className="row" style={{ gap: 8 }} data-testid="account-menu">
-      <span className="fg2" title={account.account.email}>
+      <span className="row" style={{ fontWeight: 500, fontSize: 13 }} title={account.account.email}>
+        <span className="avatar">{account.account.company.slice(0, 1).toUpperCase()}</span>
         {account.account.company}
       </span>
       <button type="button" className="btn btn-sm" onClick={() => void signOut()}>
@@ -100,15 +101,15 @@ export function Shell({
   return (
     <div className="app">
       <aside className={`sidebar${wide ? "" : " narrow"}`}>
-        <div className="brand">
-          <Logo size={18} />
+        <a className="brand" href="#/">
+          <Logo size={20} />
           {wide && (
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div>DoubleBlind</div>
               <div className="brand-sub">Integrations without shared code</div>
             </div>
           )}
-        </div>
+        </a>
         <nav className="nav">
           <div className="nav-group">
             {wide && <span className="label">Workspace</span>}
@@ -148,11 +149,6 @@ export function Shell({
             </div>
           )}
         </nav>
-        {wide && (
-          <div className="sidebar-foot">
-            <span className="mono">0 lines of code shared</span>
-          </div>
-        )}
       </aside>
       <main className="main">
         <header className="topbar">
@@ -177,16 +173,16 @@ export function Shell({
               </>
             )}
           </div>
-          <span className="grow" />
           {scope && (
-            <span className="live" title="Live event stream from the broker">
-              <span
-                className={`dot${scope.data.live ? " pulse" : ""}`}
-                style={{ background: scope.data.live ? "var(--o)" : "var(--fg3)" }}
-              />
+            <span
+              className={`live${scope.data.live ? " on" : ""}`}
+              title="Live event stream from the broker"
+            >
+              <span className={`dot${scope.data.live ? " pulse" : ""}`} />
               {scope.data.live ? "Live" : "Connecting"}
             </span>
           )}
+          <span className="grow" />
           <AccountMenu />
           <button type="button" className="btn btn-sm theme-btn" onClick={onToggleTheme}>
             <span className="half" />
