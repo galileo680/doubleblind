@@ -7,7 +7,7 @@ Two companies' AI agents build an integration between their systems. Neither age
 
 ## The problem
 
-When a shop connects to a courier, two teams have to make two private systems fit. Neither team can see the other's code, so they trade docs, emails and test calls for weeks.
+Companies connect their systems all the time: a shop to a courier, a merchant to a payment provider, a marketplace to its sellers, a supplier to a retailer. Each time, two teams have to make two private systems fit. Neither team can see the other's code, so they trade docs, emails and test calls for weeks.
 
 This is common. In the State of SaaS Integrations 2024 report, 75% of B2B companies say one integration takes three months or more. In Cleo's 2023 survey, onboarding one EDI trading partner takes a week to a month for 44% of companies and more than a month for 16%. Both numbers come from vendors of integration tools.
 
