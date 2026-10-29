@@ -41,12 +41,12 @@ Only the contract and test results cross the company boundary. Code, prompts and
 
 Each step uses a different Nemotron model on Nebius Token Factory. The mapping lives in `config/models.yaml`.
 
-| Model | Job |
-|---|---|
-| Nemotron 3 Ultra 550B | negotiates the contract |
-| Nemotron 3 Super 120B | writes the brief, writes the code, diagnoses failing tests, fixes rejected contract drafts |
-| Nemotron 3.5 Lightning | maps the company's code into a private system model |
-| Nemotron 3 Nano 30B | egress classifier, repairs malformed JSON |
+| Model                  | Job                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| Nemotron 3 Ultra 550B  | negotiates the contract                                                                    |
+| Nemotron 3 Super 120B  | writes the brief, writes the code, diagnoses failing tests, fixes rejected contract drafts |
+| Nemotron 3.5 Lightning | maps the company's code into a private system model                                        |
+| Nemotron 3 Nano 30B    | egress classifier, repairs malformed JSON                                                  |
 
 The Cost tab in the Observer view shows calls, tokens and cost for each model and the cost of each sandbox.
 
@@ -57,25 +57,32 @@ The Cost tab in the Observer view shows calls, tokens and cost for each model an
 - For the end-to-end test, the company's app starts as a service in its sandbox. Its traffic is relayed through the gateway, never directly to the partner.
 - The sandboxes and the model calls are billed to the company that runs the agent.
 
+## Where Token Factory helped
+
+- **One API for four models.** All Nemotron models sit behind one OpenAI-compatible endpoint. Moving a job to a bigger or smaller model is a one-line change in `config/models.yaml`, so I could give the hard reasoning to Ultra and the cheap checks to Nano without hosting anything.
+- **Sandboxes without infrastructure.** Each company needs its own isolated machine with the network off. Token Factory sandboxes give that through the same account and API key, so a company only runs one command and nothing has to be set up on its side.
+- **Image per step.** Every sandbox command returns a new image. The coding agent continues from the last good state, and the end-to-end test starts each company's app from the image its agent produced.
+- **Low cost per run.** A full live integration, from scope to certificate, cost $3.92 for models and sandboxes together. That made it possible to iterate on real runs instead of mocks.
+
 ## A real run
 
-Spokes, a bike shop written in Python, connects to Parcelly, a courier written in Node.js. We wrote both demo repositories for this project. Each one has internal rules that are not in its public docs.
+Spokes, a bike shop written in Python, connects to Parcelly, a courier written in Node.js. I wrote both demo repositories for this project. Each one has internal rules that are not in its public docs.
 
 Run `ses_6c794c434937`, live on Token Factory:
 
-| | |
-|---|---|
-| Time from scope to certificate | 57 min 56 s |
-| Negotiation | 11 rounds, contract version 14 |
-| Questions for people | 5 |
-| Scenarios | 8 of 8 green: Spokes 2/2, Parcelly 5/5, end-to-end 1/1 |
-| End-to-end attempts | 2. The first failed, both agents fixed their side |
-| Gateway | 46 requests, 0 refused, 0 violations |
-| Egress guard | 1 message blocked, 1 redacted |
-| Cost | $3.92: $3.02 models, $0.90 sandboxes |
-| Tokens | 8,215,490 |
-| Code shared between companies | 0 lines |
-| Patch | Parcelly 8 files, +179 −7. Spokes 6 files, +506 −1 |
+|                                |                                                        |
+| ------------------------------ | ------------------------------------------------------ |
+| Time from scope to certificate | 57 min 56 s                                            |
+| Negotiation                    | 11 rounds, contract version 14                         |
+| Questions for people           | 5                                                      |
+| Scenarios                      | 8 of 8 green: Spokes 2/2, Parcelly 5/5, end-to-end 1/1 |
+| End-to-end attempts            | 2. The first failed, both agents fixed their side      |
+| Gateway                        | 46 requests, 0 refused, 0 violations                   |
+| Egress guard                   | 1 message blocked, 1 redacted                          |
+| Cost                           | $3.92: $3.02 models, $0.90 sandboxes                   |
+| Tokens                         | 8,215,490                                              |
+| Code shared between companies  | 0 lines                                                |
+| Patch                          | Parcelly 8 files, +179 −7. Spokes 6 files, +506 −1     |
 
 You can replay this run on the live demo with "Watch the recorded run".
 
@@ -124,18 +131,18 @@ The broker and the dashboard run on http://localhost:8000. Pass `--broker http:/
 
 ## Repository layout
 
-| Path | What it is |
-|---|---|
-| `packages/agent` | the company agent and the `doubleblind connect` command |
-| `packages/broker` | FastAPI broker: sessions, negotiation, gateway, certificates. It also serves the dashboard |
-| `packages/contract` | contract format, test runner, provider stub, webhook capture server, egress rules |
-| `packages/llm` | Token Factory client, model roles, spend ledger |
-| `packages/sandbox` | Token Factory sandboxes, Docker fallback, sandbox images |
-| `dashboard` | React dashboard |
-| `demo/spokes` | demo bike shop in Python |
-| `demo/parcelly` | demo courier in Node.js |
-| `demo/recordings` | the recorded certified run shown on the home page |
-| `config` | models, roles and prices |
+| Path                | What it is                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `packages/agent`    | the company agent and the `doubleblind connect` command                                    |
+| `packages/broker`   | FastAPI broker: sessions, negotiation, gateway, certificates. It also serves the dashboard |
+| `packages/contract` | contract format, test runner, provider stub, webhook capture server, egress rules          |
+| `packages/llm`      | Token Factory client, model roles, spend ledger                                            |
+| `packages/sandbox`  | Token Factory sandboxes, Docker fallback, sandbox images                                   |
+| `dashboard`         | React dashboard                                                                            |
+| `demo/spokes`       | demo bike shop in Python                                                                   |
+| `demo/parcelly`     | demo courier in Node.js                                                                    |
+| `demo/recordings`   | the recorded certified run shown on the home page                                          |
+| `config`            | models, roles and prices                                                                   |
 
 ## Development
 
@@ -150,12 +157,10 @@ The same tasks are available through `make`. `npm run test:e2e` in `dashboard` r
 ## Limitations
 
 - A live run takes about an hour and costs a few dollars.
-- Live runs do not always certify. Our first certified run came after 16 attempts. When negotiation reaches the round limit, people can allow 6 more rounds or stop the run.
-- We tested on the two demo repositories we wrote, not on real company codebases yet.
-- It covers HTTP JSON APIs and webhooks. It does not cover EDI files, queues or databases.
-- The broker is a trusted third party. It sees the briefs, the contract and test results, never code. It runs on one server with SQLite.
+- Live runs do not always certify. My first certified run came after 16 attempts. When negotiation reaches the round limit, people can allow 6 more rounds or stop the run.
+- I tested it on the two demo repositories I wrote, not on real company codebases yet.
 - The egress guard lowers the risk of a leak. It does not prove that nothing leaked.
-- We tried Tavily web search for the negotiator. It made negotiations worse, so it is off by default.
+- I tried Tavily web search for the negotiator. It made negotiations worse, so it is off by default.
 - DoubleBlind speeds up engineering and contract negotiation. It does not replace legal agreements, security reviews or regulatory certification.
 
 ## License
