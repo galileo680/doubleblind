@@ -8,9 +8,9 @@ function initialTheme(): Theme {
     const stored = localStorage.getItem(KEY);
     if (stored === "dark" || stored === "light") return stored;
   } catch {
-    return "light";
+    return "dark";
   }
-  return "light";
+  return "dark";
 }
 
 export function useTheme(): [Theme, () => void] {
