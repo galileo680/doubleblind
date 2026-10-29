@@ -404,6 +404,7 @@ export const ROLE_TASK: Record<string, string> = {
 export interface ModelUse {
   cost: number;
   calls: number;
+  tokens: number;
   roles: Map<string, number>;
 }
 
@@ -411,12 +412,19 @@ export function costs(events: BrokerEvent[]) {
   const models = new Map<string, ModelUse>();
   const sandboxes = new Map<string, number>();
   for (const event of ofType(events, "llm.call", "sandbox.cost")) {
-    const data = payload<{ model?: string; role?: string; party: string; cost_usd: number }>(event);
+    const data = payload<{
+      model?: string;
+      role?: string;
+      party: string;
+      cost_usd: number;
+      tokens?: number;
+    }>(event);
     if (event.type === "llm.call") {
       const name = (data.model ?? "model").replace(/^nvidia\//, "");
-      const use = models.get(name) ?? { cost: 0, calls: 0, roles: new Map() };
+      const use = models.get(name) ?? { cost: 0, calls: 0, tokens: 0, roles: new Map() };
       use.cost += data.cost_usd;
       use.calls += 1;
+      use.tokens += data.tokens ?? 0;
       const role = data.role ?? "agent";
       use.roles.set(role, (use.roles.get(role) ?? 0) + data.cost_usd);
       models.set(name, use);

@@ -242,6 +242,7 @@ function ModelRows({ models }: { models: Map<string, ModelUse> }) {
               {name}
             </span>
             <span className="mono muted">{use.calls} calls</span>
+            <span className="mono muted">{use.tokens.toLocaleString()} tokens</span>
             <span className="mono" style={{ width: 64, textAlign: "right", fontWeight: 600 }}>
               {usd(use.cost, use.cost < 0.01 ? 3 : 2)}
             </span>
