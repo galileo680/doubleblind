@@ -33,7 +33,7 @@ Only the contract and test results cross the company boundary. Code, prompts and
 ## What protects each company's code
 
 - **Separate agents and sandboxes.** Each agent reads only its own repository. It runs in its company's sandbox, paid from its company's account.
-- **Egress guard.** Every message that leaves a company passes two checks. Deterministic rules block code lines, secrets, long tokens, stack traces and personal data that is not in the company's synthetic test data. Then Nemotron Nano classifies the message and can block it or redact fragments. A blocked message goes back to the agent, which rewrites it up to three times.
+- **Egress guard.** Every message that leaves a company passes two checks. Deterministic rules block code lines, secrets, long tokens, stack traces and personal data that is not in the company's synthetic test data. Then Nemotron 3.5 Lightning classifies the message and can block it or redact fragments. A blocked message goes back to the agent, which rewrites it up to three times.
 - **Gateway.** In the end-to-end test, a request that is not in the contract is refused. Schema mismatches are counted as violations.
 - **Company view.** Each company sees its own agent, its own questions and the shared contract. The partner's code, prompts, questions and logs show as locked tiles.
 
@@ -41,12 +41,13 @@ Only the contract and test results cross the company boundary. Code, prompts and
 
 Each step uses a different Nemotron model on Nebius Token Factory. The mapping lives in `config/models.yaml`.
 
-| Model                  | Job                                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------------------ |
-| Nemotron 3 Ultra 550B  | negotiates the contract                                                                    |
-| Nemotron 3 Super 120B  | writes the brief, writes the code, diagnoses failing tests, fixes rejected contract drafts |
-| Nemotron 3.5 Lightning | maps the company's code into a private system model                                        |
-| Nemotron 3 Nano 30B    | egress classifier, repairs malformed JSON                                                  |
+| Model                  | Job                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------- |
+| Nemotron 3 Ultra 550B  | negotiates the contract                                                                        |
+| Nemotron 3.5 Super VL  | writes the brief, writes the code, diagnoses failing tests, fixes rejected contract drafts     |
+| Nemotron 3.5 Lightning | maps the company's code into a private system model, egress classifier, repairs malformed JSON |
+
+Token Factory retires Nemotron 3 Super 120B and Nemotron 3 Nano 30B on November 9, 2026. The code uses the replacements Nebius recommends: Nemotron 3.5 Super VL for Super and Nemotron 3.5 Lightning for Nano. The official run below, the demo video and the certificate were made with the old models: Super 120B did the jobs of Super VL, and Nano 30B was the egress classifier and repaired JSON. I checked every role on the new models with its real settings, and the egress classifier scored the same as Nano on the leak test set.
 
 The Cost tab in the Observer view shows calls, tokens and cost for each model and the cost of each sandbox.
 
@@ -59,7 +60,7 @@ The Cost tab in the Observer view shows calls, tokens and cost for each model an
 
 ## Where Token Factory helped
 
-- **One API for four models.** All Nemotron models sit behind one OpenAI-compatible endpoint. Moving a job to a bigger or smaller model is a one-line change in `config/models.yaml`, so I could give the hard reasoning to Ultra and the cheap checks to Nano without hosting anything.
+- **One API for every model.** All Nemotron models sit behind one OpenAI-compatible endpoint. Moving a job to a bigger or smaller model is a one-line change in `config/models.yaml`, so I could give the hard reasoning to Ultra and the cheap checks to a small model without hosting anything.
 - **Sandboxes without infrastructure.** Each company needs its own isolated machine with the network off. Token Factory sandboxes give that through the same account and API key, so a company only runs one command and nothing has to be set up on its side.
 - **Image per step.** Every sandbox command returns a new image. The coding agent continues from the last good state, and the end-to-end test starts each company's app from the image its agent produced.
 - **Low cost per run.** A full live integration, from scope to certificate, cost $3.92 for models and sandboxes together. That made it possible to iterate on real runs instead of mocks.
@@ -68,7 +69,7 @@ The Cost tab in the Observer view shows calls, tokens and cost for each model an
 
 Spokes, a bike shop written in Python, connects to Parcelly, a courier written in Node.js. I wrote both demo repositories for this project. Each one has internal rules that are not in its public docs.
 
-Run `ses_6c794c434937`, live on Token Factory:
+Run `ses_6c794c434937`, live on Token Factory with Ultra 550B, Super 120B, Lightning and Nano 30B:
 
 |                                |                                                        |
 | ------------------------------ | ------------------------------------------------------ |

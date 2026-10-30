@@ -1,29 +1,17 @@
 {
-  "generated_at": "2026-10-05T19:24:45.038497+00:00",
+  "generated_at": "2026-10-30T14:19:27.159160+00:00",
   "base_url": "https://api.tokenfactory.nebius.com/v1/",
   "models": {
-    "nano": {
-      "alias": "nano",
-      "id": "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B",
-      "available": true,
-      "native_tools": true,
-      "json_schema": true,
-      "thinking": {
-        "toggle": "chat_template_kwargs"
-      },
-      "latency_ms": 574,
-      "errors": []
-    },
     "super": {
       "alias": "super",
-      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "id": "nvidia/Nemotron-3.5-Super-VL",
       "available": true,
       "native_tools": true,
       "json_schema": true,
       "thinking": {
         "toggle": "chat_template_kwargs"
       },
-      "latency_ms": 297,
+      "latency_ms": 651,
       "errors": []
     },
     "ultra": {
@@ -35,7 +23,7 @@
       "thinking": {
         "toggle": "chat_template_kwargs"
       },
-      "latency_ms": 254,
+      "latency_ms": 507,
       "errors": []
     },
     "lightning": {
@@ -47,7 +35,7 @@
       "thinking": {
         "toggle": "chat_template_kwargs"
       },
-      "latency_ms": 243,
+      "latency_ms": 173,
       "errors": []
     }
   }

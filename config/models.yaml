@@ -1,17 +1,14 @@
 base_url: https://api.tokenfactory.nebius.com/v1/
 models:
-  nano:
-    id: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B
-    max_concurrency: 16
   super:
-    id: nvidia/nemotron-3-super-120b-a12b
+    id: nvidia/Nemotron-3.5-Super-VL
     max_concurrency: 6
   ultra:
     id: nvidia/Nemotron-3-Ultra-550b-a55b
     max_concurrency: 2
   lightning:
     id: nvidia/Nemotron-3_5-Lightning
-    max_concurrency: 2
+    max_concurrency: 16
 roles:
   psm:
     model: lightning
@@ -48,17 +45,17 @@ roles:
     temperature: 0
     max_tokens: 1500
   guard:
-    model: nano
+    model: lightning
     thinking: "off"
     temperature: 0
     max_tokens: 800
   repair:
-    model: nano
+    model: lightning
     thinking: "off"
     temperature: 0
     max_tokens: 4000
   human_sim:
-    model: nano
+    model: lightning
     thinking: "off"
     temperature: 0
     max_tokens: 400

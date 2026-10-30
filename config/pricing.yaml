@@ -1,7 +1,4 @@
-nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B:
-  input_per_m: 0.06
-  output_per_m: 0.24
-nvidia/nemotron-3-super-120b-a12b:
+nvidia/Nemotron-3.5-Super-VL:
   input_per_m: 0.30
   output_per_m: 0.90
 nvidia/Nemotron-3-Ultra-550b-a55b:
